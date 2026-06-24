@@ -1,0 +1,14 @@
+name = "autofill-ai-proxy"
+main = "backend-proxy.js"
+compatibility_date = "2024-03-01"
+
+# Cloudflare Workers configuration for SaaS
+# To deploy run: npx wrangler deploy
+
+[vars]
+SUPABASE_URL = "https://uipnnsbbdsgchgphvliw.supabase.co"
+SUPABASE_ANON_KEY = "sb_publishable_aC1l5VraOSWjYSPFfBqHCA_5uyBRfy0"
+
+[[kv_namespaces]]
+binding = "USERS_KV"
+id = "51b2b1109d24413f88eeb77b89d81659"

@@ -1,0 +1,340 @@
+/* Dock Base Variables */
+.af-dock-root {
+  --af-font-title: 'Outfit', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --af-font-body: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --af-primary: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+  --af-primary-hover: linear-gradient(135deg, #818cf8 0%, #6366f1 100%);
+  --af-danger: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  --af-bg: rgba(255, 255, 255, 0.75);
+  --af-bg-blur: blur(24px) saturate(180%);
+  --af-border: 1px solid rgba(255, 255, 255, 0.5);
+  --af-shadow: 0 20px 50px rgba(0, 0, 0, 0.12), inset 0 0 0 1px rgba(255, 255, 255, 0.6);
+  --af-text: #0f172a;
+  --af-text-muted: #64748b;
+  
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 2147483647;
+  font-family: var(--af-font-body);
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  pointer-events: auto;
+}
+
+/* Expanded Dock Panel */
+.af-dock-panel {
+  width: 320px;
+  background: var(--af-bg);
+  backdrop-filter: var(--af-bg-blur);
+  -webkit-backdrop-filter: var(--af-bg-blur);
+  border: var(--af-border);
+  border-radius: 28px;
+  box-shadow: var(--af-shadow);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  transform-origin: bottom right;
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Compact Bubble Mode */
+.af-dock-bubble {
+  width: 52px;
+  height: 52px;
+  background: var(--af-primary);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 10px 25px rgba(79, 70, 229, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+  color: white;
+  transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+.af-dock-bubble:hover {
+  transform: scale(1.1) rotate(12deg);
+  box-shadow: 0 15px 30px rgba(79, 70, 229, 0.5);
+}
+
+/* Header */
+.af-dock-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.af-dock-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.af-dock-icon {
+  width: 32px;
+  height: 32px;
+  background: var(--af-primary);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  box-shadow: 0 4px 12px rgba(79, 70, 229, 0.2);
+}
+.af-dock-title {
+  font-family: var(--af-font-title);
+  font-size: 16px;
+  font-weight: 900;
+  color: var(--af-text);
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+.af-dock-status {
+  font-size: 9px;
+  font-weight: 800;
+  color: var(--af-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: rgba(0, 0, 0, 0.04);
+  padding: 4px 8px;
+  border-radius: 8px;
+}
+.af-dock-minimize {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 10px;
+  color: var(--af-text-muted);
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.af-dock-minimize:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--af-text);
+  transform: scale(1.05);
+}
+
+/* Persona Selector tabs */
+.af-persona-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.af-section-label {
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--af-text-muted);
+  margin-bottom: 2px;
+}
+.af-persona-grid {
+  display: grid;
+  grid-template-cols: repeat(2, 1fr);
+  background: rgba(0, 0, 0, 0.04);
+  padding: 3px;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.02);
+  gap: 3px;
+}
+.af-persona-tab {
+  background: none;
+  border: none;
+  padding: 8px;
+  font-family: var(--af-font-body);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--af-text-muted);
+  cursor: pointer;
+  border-radius: 9px;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  text-align: center;
+}
+.af-persona-tab:hover {
+  color: var(--af-text);
+}
+.af-persona-tab.active {
+  background: white;
+  color: #4f46e5;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
+}
+
+/* Custom Instruction Field */
+.af-custom-prompt-container {
+  max-height: 0;
+  overflow: hidden;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  opacity: 0;
+}
+.af-custom-prompt-container.visible {
+  max-height: 80px;
+  opacity: 1;
+  margin-top: 4px;
+}
+.af-custom-prompt-input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  background: white;
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-family: var(--af-font-body);
+  font-size: 12px;
+  color: var(--af-text);
+  outline: none;
+  transition: border 0.2s;
+}
+.af-custom-prompt-input:focus {
+  border-color: #6366f1;
+}
+
+/* Fill & Control Actions */
+.af-dock-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.af-btn-primary {
+  background: var(--af-primary);
+  border: none;
+  border-radius: 16px;
+  height: 48px;
+  font-family: var(--af-font-title);
+  font-size: 14px;
+  font-weight: 800;
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-shadow: 0 6px 18px rgba(79, 70, 229, 0.2);
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.af-btn-primary:hover {
+  background: var(--af-primary-hover);
+  transform: scale(1.02);
+  box-shadow: 0 8px 22px rgba(79, 70, 229, 0.3);
+}
+.af-btn-primary:active {
+  transform: scale(0.98);
+}
+.af-btn-primary svg,
+.af-btn-primary span {
+  pointer-events: none;
+}
+.af-btn-primary.loading {
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--af-text-muted);
+  box-shadow: none;
+  pointer-events: none;
+  cursor: wait;
+}
+.af-btn-primary.limit-reached {
+  background: linear-gradient(135deg, #ef4444 0%, #f97316 100%) !important;
+  box-shadow: 0 6px 18px rgba(239, 68, 68, 0.2) !important;
+}
+.af-btn-primary.limit-reached:hover {
+  background: linear-gradient(135deg, #f87171 0%, #fb923c 100%) !important;
+  box-shadow: 0 8px 22px rgba(239, 68, 68, 0.3) !important;
+}
+
+.af-dock-subactions {
+  display: grid;
+  grid-template-cols: 1fr 1fr;
+  gap: 8px;
+}
+.af-btn-secondary {
+  background: rgba(0, 0, 0, 0.04);
+  border: 1px solid rgba(0, 0, 0, 0.02);
+  border-radius: 12px;
+  height: 36px;
+  font-family: var(--af-font-body);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--af-text);
+  cursor: pointer;
+  transition: all 0.25s;
+}
+.af-btn-secondary:hover {
+  background: rgba(0, 0, 0, 0.08);
+}
+.af-btn-danger {
+  background: rgba(239, 68, 68, 0.06);
+  border: 1px solid rgba(239, 68, 68, 0.1);
+  border-radius: 12px;
+  height: 36px;
+  font-family: var(--af-font-body);
+  font-size: 11px;
+  font-weight: 700;
+  color: #ef4444;
+  cursor: pointer;
+  transition: all 0.25s;
+}
+.af-btn-danger:hover {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.2);
+}
+
+/* Shortcut Footer Info */
+.af-dock-footer {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  color: var(--af-text-muted);
+  font-weight: 600;
+  border-top: 1px solid rgba(0, 0, 0, 0.04);
+  padding-top: 10px;
+}
+
+/* Visual Pulse Magic Fill Animation */
+@keyframes af-pulse-wave {
+  0% {
+    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.5), inset 0 0 0 2px rgba(99, 102, 241, 0.5);
+    border-color: #6366f1;
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgba(99, 102, 241, 0), inset 0 0 0 2px rgba(99, 102, 241, 0.2);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0), inset 0 0 0 0 rgba(99, 102, 241, 0);
+    border-color: inherit;
+  }
+}
+.af-filled-pulse {
+  animation: af-pulse-wave 1.4s ease-out;
+}
+@keyframes af-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.af-animate-spin {
+  animation: af-spin 1s linear infinite;
+  display: inline-block;
+}
+
+/* In-Page Dock Error Alert Styling */
+.af-dock-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(239, 68, 68, 0.08) !important;
+  border: 1px solid rgba(239, 68, 68, 0.15) !important;
+  border-radius: 12px !important;
+  padding: 10px 12px !important;
+  color: #ef4444 !important;
+  font-size: 10.5px !important;
+  font-weight: 600 !important;
+  line-height: 1.4 !important;
+  margin-top: 4px !important;
+  animation: af-fade-in-slide 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+.af-dock-error svg {
+  color: #ef4444 !important;
+  flex-shrink: 0;
+}
+@keyframes af-fade-in-slide {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}

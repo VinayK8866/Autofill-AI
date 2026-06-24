@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "AutoFill AI",
+  "version": "1.0.0",
+  "description": "Form filling with context-aware AI.",
+  "permissions": ["storage", "activeTab", "scripting", "contextMenus", "webNavigation"],
+  "host_permissions": [
+    "https://autofill-ai-proxy.vinaykondabattula.workers.dev/"
+  ],
+  "optional_host_permissions": [
+    "https://api.openai.com/*",
+    "https://api.anthropic.com/*",
+    "https://generativelanguage.googleapis.com/*"
+  ],
+  "action": {
+    "default_popup": "index.html"
+  },
+  "options_page": "options.html",
+  "background": {
+    "service_worker": "src/background/background.ts",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/content/content.ts"],
+      "all_frames": true
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["options.html"],
+      "matches": ["https://uipnnsbbdsgchgphvliw.supabase.co/*"]
+    }
+  ]
+}
