@@ -17,6 +17,63 @@ export default {
     const isAllowed = origin.startsWith("chrome-extension://") || origin.endsWith("vinaykondabattula.workers.dev");
     const allowedOrigin = isAllowed ? origin : "null";
 
+    const url = new URL(request.url);
+    const isPostHogRequest = url.pathname.startsWith("/posthog/");
+
+    // Handle PostHog Proxying
+    if (isPostHogRequest) {
+      const targetPath = url.pathname.replace(/^\/posthog/, "");
+      const posthogUrl = new URL(targetPath + url.search, "https://us.i.posthog.com");
+
+      // Handle OPTIONS preflight specifically for PostHog
+      if (request.method === "OPTIONS") {
+        return new Response(null, {
+          headers: {
+            "Access-Control-Allow-Origin": allowedOrigin,
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With",
+          },
+        });
+      }
+
+      const headers = new Headers(request.headers);
+      headers.set("Host", "us.i.posthog.com");
+      
+      const clientIP = request.headers.get("CF-Connecting-IP");
+      if (clientIP) {
+        headers.set("X-Forwarded-For", clientIP);
+        headers.set("X-Real-IP", clientIP);
+      }
+
+      try {
+        const response = await fetch(posthogUrl.toString(), {
+          method: request.method,
+          headers: headers,
+          body: request.method === "GET" || request.method === "HEAD" ? null : request.body,
+          redirect: "follow"
+        });
+
+        const responseHeaders = new Headers(response.headers);
+        responseHeaders.set("Access-Control-Allow-Origin", allowedOrigin);
+        responseHeaders.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+        responseHeaders.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
+
+        return new Response(response.body, {
+          status: response.status,
+          statusText: response.statusText,
+          headers: responseHeaders
+        });
+      } catch (err) {
+        return new Response(JSON.stringify({ error: `PostHog Proxy Error: ${err.message}` }), {
+          status: 502,
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": allowedOrigin
+          }
+        });
+      }
+    }
+
     const corsHeaders = {
       "Access-Control-Allow-Origin": allowedOrigin,
       "Access-Control-Allow-Methods": "POST, OPTIONS",
@@ -33,8 +90,6 @@ export default {
     if (request.method !== "POST") {
       return new Response("Method Not Allowed", { status: 405 });
     }
-
-    const url = new URL(request.url);
     const isUsageRequest = url.pathname === "/usage";
     const isWebhookRequest = url.pathname === "/webhook/razorpay";
 
@@ -159,6 +214,12 @@ export default {
       const requestBody = await request.json();
       const prompt = requestBody.prompt;
       const incrementUsage = requestBody.incrementUsage;
+
+      if (prompt === "PING_TEST") {
+        return new Response(JSON.stringify({ success: true, message: "pong" }), {
+          headers: { "Content-Type": "application/json", ...corsHeaders }
+        });
+      }
 
       // 5. Check Limits before Generation
       if (incrementUsage !== false) {

@@ -101,6 +101,13 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
       });
     return true;
   }
+
+  if (request.action === 'test_connection') {
+    handleTestConnection(request.provider, request.key, request.proxyUrl)
+      .then(msg => sendResponse({ success: true, message: msg }))
+      .catch(err => sendResponse({ success: false, error: err.message || String(err) }));
+    return true;
+  }
 });
 
 async function handleGenerateData(fields: FormField[], persona: string, customPrompt: string) {
@@ -443,10 +450,8 @@ async function generateAICompletion(prompt: string, settings: Record<string, str
     return data.content[0].text;
   }
 
-  // Cloud proxy — always use the hardcoded canonical URL (ignore stale storage values)
-  const cloudUrl = 'https://autofill-ai-proxy.vinaykondabattula.workers.dev';
-  // Keep storage in sync so Options UI shows the right URL
-  chrome.storage.local.set({ cloudProxyUrl: cloudUrl });
+  // Cloud proxy — use custom cloudProxyUrl if configured, otherwise fallback to canonical URL
+  const cloudUrl = (settings.cloudProxyUrl as string) || 'https://autofill-ai-proxy.vinaykondabattula.workers.dev';
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json'
@@ -670,3 +675,69 @@ function parseFlatJSONWithKnownKeys(str: string, keys: string[]): Record<string,
   
   return result;
 }
+
+async function handleTestConnection(provider: string, key: string, proxyUrl?: string): Promise<string> {
+  if (provider === 'gemini') {
+    if (!key) throw new Error("Gemini API key is missing.");
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${key}`);
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error?.message || `Gemini API returned status ${response.status}`);
+    }
+    return "Gemini API key is valid!";
+  }
+
+  if (provider === 'openai') {
+    if (!key) throw new Error("OpenAI API key is missing.");
+    const response = await fetch('https://api.openai.com/v1/models', {
+      headers: { 'Authorization': `Bearer ${key}` }
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error?.message || `OpenAI API returned status ${response.status}`);
+    }
+    return "OpenAI API key is valid!";
+  }
+
+  if (provider === 'anthropic') {
+    if (!key) throw new Error("Anthropic API key is missing.");
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': key,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: 'claude-3-5-sonnet-20241022',
+        max_tokens: 1,
+        messages: [{ role: 'user', content: 'Ping' }]
+      })
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error?.message || `Anthropic API returned status ${response.status}`);
+    }
+    return "Anthropic API key is valid!";
+  }
+
+  if (provider === 'cloud') {
+    const url = proxyUrl || 'https://autofill-ai-proxy.vinaykondabattula.workers.dev';
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'PING_TEST', incrementUsage: false })
+    });
+    if (!response.ok) {
+      throw new Error(`Proxy returned status ${response.status}`);
+    }
+    const data = await response.json().catch(() => ({}));
+    if (data && data.success) {
+      return "Cloud proxy connection is healthy!";
+    }
+    throw new Error("Invalid response from cloud proxy.");
+  }
+
+  throw new Error(`Unknown provider type: ${provider}`);
+}
+
