@@ -352,35 +352,35 @@ export const Popup = () => {
       return {
         label: 'Private API Key',
         icon: <Rocket className="w-3.5 h-3.5" />,
-        desc: 'Unlimited fills via private key'
+        desc: 'Unlimited fills'
       };
     }
     if (aiProvider === 'local') {
       return {
-        label: 'Offline AI (Gemini Nano)',
+        label: 'Local Gemini Nano',
         icon: <Cpu className="w-3.5 h-3.5" />,
-        desc: 'Unlimited private offline fills'
+        desc: 'Unlimited offline fills'
       };
     }
     // Cloud modes
     if (authToken) {
       if (userPlan === 'Pro Plan') {
         return {
-          label: 'Unlimited Pro Cloud',
+          label: 'Autofill AI (Pro)',
           icon: <Globe className="w-3.5 h-3.5" />,
-          desc: `${userEmail} (Unlimited Fills)`
+          desc: 'Unlimited fills'
         };
       }
       return {
-        label: 'Basic Autofill AI',
+        label: 'Autofill AI (Free)',
         icon: <Globe className="w-3.5 h-3.5" />,
-        desc: `${userEmail} (${Math.max(0, 50 - usageCount)}/50 fills left)`
+        desc: `${Math.max(0, 50 - usageCount)}/50 left`
       };
     }
     return {
-      label: 'Autofill AI (Authentication Required)',
+      label: 'Autofill AI',
       icon: <Globe className="w-3.5 h-3.5" />,
-      desc: 'Log in inside settings to unlock 50 free fills'
+      desc: 'Unlock 50 free fills'
     };
   };
 
@@ -469,29 +469,34 @@ export const Popup = () => {
 
           {/* Connection Status Card */}
           <div className="px-6 mb-3">
-            <div className="bg-gradient-to-br from-indigo-50/40 via-purple-50/20 to-slate-50/50 backdrop-blur-xl border border-indigo-100/40 rounded-2xl p-3 flex items-center justify-between shadow-sm shadow-indigo-100/20 animate-in fade-in duration-300">
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 shadow-md shadow-indigo-200/50 text-white">
-                  {mode.icon}
+            <div className="bg-gradient-to-br from-indigo-50/40 via-purple-50/20 to-slate-50/50 backdrop-blur-xl border border-indigo-100/40 rounded-2xl p-3 flex flex-col gap-2.5 shadow-sm shadow-indigo-100/10 animate-in fade-in duration-300">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 shadow-md shadow-indigo-200/50 text-white">
+                    {mode.icon}
+                  </div>
+                  <div>
+                    <p className="text-[14px] font-black text-slate-800 leading-none">
+                      {mode.label}
+                    </p>
+                    <p className="text-[9px] font-bold text-slate-400 mt-1 leading-none uppercase tracking-wider">
+                      {aiProvider === 'cloud' ? (authToken ? 'Cloud Engine' : 'Cloud Engine (Auth Required)') : aiProvider === 'local' ? 'Local Engine' : 'Private Key Engine'}
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-[9px] font-black text-indigo-600/70 uppercase tracking-[0.15em] leading-none mb-1">Fill Engine</p>
-                  <p className="text-[14px] font-bold text-slate-800 leading-none">
-                    {mode.label}
-                  </p>
-                  <p className="text-[10px] font-semibold text-slate-400 mt-1 leading-none font-sans">
-                    {mode.desc}
-                  </p>
+                <div className={`px-2 py-0.5 rounded-full border flex items-center gap-1 shadow-sm ${limitReached
+                  ? 'bg-rose-50 border-rose-100 text-rose-600 shadow-rose-50'
+                  : 'bg-emerald-50 border-emerald-100 text-emerald-700 shadow-emerald-50'
+                  }`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${limitReached ? 'bg-rose-500' : 'bg-emerald-500 animate-pulse'}`} />
+                  <span className="text-[9px] font-black uppercase tracking-widest leading-none">
+                    {limitReached ? 'Limited' : 'Active'}
+                  </span>
                 </div>
               </div>
-              <div className={`px-2 py-1 rounded-full border flex items-center gap-1 shadow-sm ${limitReached
-                ? 'bg-rose-50 border-rose-100 text-rose-600 shadow-rose-50'
-                : 'bg-emerald-50 border-emerald-100 text-emerald-700 shadow-emerald-50'
-                }`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${limitReached ? 'bg-rose-500' : 'bg-emerald-500 animate-pulse'}`} />
-                <span className="text-[10px] font-black uppercase tracking-widest leading-none">
-                  {limitReached ? 'Limited' : 'Active'}
-                </span>
+              <div className="border-t border-slate-100/60 pt-2 flex items-center justify-between text-[11px] font-semibold text-slate-500 leading-none">
+                <span className="truncate max-w-[170px] text-slate-400 font-medium">{authToken ? userEmail : 'Guest User'}</span>
+                <span className="text-slate-600 font-black">{mode.desc}</span>
               </div>
             </div>
           </div>
