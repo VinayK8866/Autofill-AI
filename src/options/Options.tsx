@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Sparkles, Lock, Settings2, CheckCircle2, AlertCircle, User, Globe } from 'lucide-react';
+import { Lock, Settings2, CheckCircle2, AlertCircle, User, Globe } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { posthog } from '@/lib/posthog';
+import { Logo } from '@/components/Logo';
 
 // Subcomponents
 import { OnboardingWizard } from './components/OnboardingWizard';
@@ -712,7 +713,7 @@ export const Options = () => {
                 )}
               </div>
               <CardTitle className="text-4xl font-black tracking-tight text-slate-900 flex items-center gap-3">
-                <Sparkles className="w-8 h-8 text-indigo-500 fill-indigo-50" />
+                <Logo size={32} />
                 {activeTab === 'account' ? (isLoggedIn ? 'My Account' : 'Sign In / Sign Up') : activeTab === 'profile' ? 'My Profile' : 'AI Provider'}
               </CardTitle>
               <CardDescription className="text-slate-500 text-base font-medium">

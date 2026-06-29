@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Settings, Sparkles, History, Cpu, Globe, Rocket, AlertCircle, LockKeyhole, User } from 'lucide-react';
 import { posthog } from '@/lib/posthog';
+import { Logo } from '@/components/Logo';
 
 export const Popup = () => {
   const [loading, setLoading] = useState(false);
@@ -460,8 +461,8 @@ export const Popup = () => {
         <div className="p-4 pb-1">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
-              <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg transform rotate-3">
-                <Sparkles className="w-6 h-6 text-white fill-white/20" />
+              <div className="w-10 h-10 flex items-center justify-center shadow-lg transform rotate-3 bg-white rounded-xl border border-slate-100 p-1">
+                <Logo size={28} />
               </div>
               <div>
                 <h1 className="text-xl font-black text-slate-900 tracking-tight leading-none">AutoFill AI</h1>

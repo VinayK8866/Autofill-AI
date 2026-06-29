@@ -42,19 +42,19 @@
 .af-dock-bubble {
   width: 52px;
   height: 52px;
-  background: var(--af-primary);
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.05);
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  box-shadow: 0 10px 25px rgba(79, 70, 229, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.2);
-  color: white;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.08), inset 0 0 0 1px rgba(255, 255, 255, 0.2);
   transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
 .af-dock-bubble:hover {
   transform: scale(1.1) rotate(12deg);
-  box-shadow: 0 15px 30px rgba(79, 70, 229, 0.5);
+  box-shadow: 0 15px 30px rgba(0, 0, 0, 0.12);
 }
 
 /* Header */
@@ -71,13 +71,13 @@
 .af-dock-icon {
   width: 32px;
   height: 32px;
-  background: var(--af-primary);
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.06);
   border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: white;
-  box-shadow: 0 4px 12px rgba(79, 70, 229, 0.2);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
 }
 .af-dock-title {
   font-family: var(--af-font-title);

@@ -3,6 +3,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Sparkles, User, AlertCircle, Globe, CheckCircle2, Lock, ArrowRight } from 'lucide-react';
+import { Logo } from '@/components/Logo';
 
 interface OnboardingWizardProps {
   onboardingStep: 'walkthrough' | 'profile' | 'success';
@@ -63,7 +64,7 @@ export const OnboardingWizard = ({
             Getting Started
           </Badge>
           <h2 className="text-3xl font-black tracking-tight text-slate-900 justify-center flex items-center gap-3">
-            <Sparkles className="w-7 h-7 text-indigo-500 fill-indigo-50" />
+            <Logo size={28} />
             How AutoFill Works
           </h2>
           <p className="text-slate-500 text-sm font-medium">
@@ -80,7 +81,7 @@ export const OnboardingWizard = ({
               {/* Header */}
               <div className="flex justify-between items-center pb-2.5 border-b border-slate-100">
                 <div className="flex items-center gap-1.5 font-black text-slate-800 text-xs">
-                  <Sparkles className="w-3.5 h-3.5 text-indigo-500 fill-indigo-50" />
+                  <Logo size={14} />
                   <span>AutoFill AI</span>
                 </div>
                 <span className="text-[9px] bg-indigo-50 text-indigo-600 font-bold px-1.5 py-0.5 rounded">3 fields found</span>
