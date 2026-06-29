@@ -139,13 +139,7 @@ async function handleGenerateData(fields: FormField[], persona: string, customPr
 
   if (!fields || fields.length === 0) return {};
 
-  const CHUNK_SIZE = persona === 'qa' ? 5 : 15;
-  const fieldChunks: FormField[][] = [];
-  for (let i = 0; i < fields.length; i += CHUNK_SIZE) {
-    fieldChunks.push(fields.slice(i, i + CHUNK_SIZE));
-  }
-
-  console.log(`[AutoFill AI] Processing ${fields.length} fields in ${fieldChunks.length} chunk(s).`);
+  console.log(`[AutoFill AI] Processing all ${fields.length} fields in a single AI call.`);
 
   let personaContext = "";
   if (persona === 'default') {
@@ -170,24 +164,20 @@ async function handleGenerateData(fields: FormField[], persona: string, customPr
   }
 
   try {
-    const chunkPromises = fieldChunks.map(async (chunk, index) => {
-      const prompt = getPromptForPersona(persona, customPrompt, chunk, settings, personaContext);
-      const shouldIncrement = (index === 0);
-      
-      const rawResult = await generateAICompletion(prompt, settings, shouldIncrement, chunk);
-      console.log(`Raw LLM output received for chunk ${index + 1}/${fieldChunks.length}:`, rawResult);
+    const prompt = getPromptForPersona(persona, customPrompt, fields, settings, personaContext);
+    
+    // Send a single completion request for all fields
+    const rawResult = await generateAICompletion(prompt, settings, true, fields);
+    console.log(`[AutoFill AI] Raw LLM output received:`, rawResult);
 
-      const jsonMatch = rawResult.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        console.warn(`Could not find matching JSON block in output for chunk ${index + 1}. Returning blank.`);
-        return {};
-      }
+    const jsonMatch = rawResult.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      console.warn("Could not find matching JSON block in output. Returning blank.");
+      return {};
+    }
 
-      const chunkKeys = chunk.map(f => f.id);
-      return parseRobustJSON(jsonMatch[0], chunkKeys);
-    });
-
-    const results = await Promise.all(chunkPromises);
+    const fieldKeys = fields.map(f => f.id);
+    const parsedResult = parseRobustJSON(jsonMatch[0], fieldKeys);
 
     // Increment SaaS usage count locally upon successful completion
     if (provider === 'cloud') {
@@ -195,10 +185,9 @@ async function handleGenerateData(fields: FormField[], persona: string, customPr
       await chrome.storage.local.set({ usageCount: newUsage });
     }
 
-    const mergedResult = Object.assign({}, ...results);
-    return mergedResult;
+    return parsedResult;
   } catch (error: unknown) {
-    console.warn('LLM Engine Error during chunked generation:', error);
+    console.warn('LLM Engine Error during generation:', error);
     const rawMessage = error instanceof Error ? error.message : 'Error occurred while calling the AI model.';
     const message = cleanErrorMessage(rawMessage);
     throw new Error(message);
@@ -421,9 +410,23 @@ async function generateAICompletion(prompt: string, settings: Record<string, str
 
         const result = await model.generateContent(prompt);
         return result.response.text();
-      } catch (err) {
+      } catch (err: any) {
         console.warn(`[AutoFill AI] Direct model ${modelName} failed:`, err);
         lastError = err;
+
+        const errMsg = err?.message || String(err);
+        
+        // Parse HTTP status code from Google SDK error if present (e.g. "[403 Forbidden] ...")
+        const statusMatch = errMsg.match(/\[(\d+)\]/);
+        const status = statusMatch ? parseInt(statusMatch[1], 10) : (err?.status || 0);
+
+        // Abort cascade loop for static client/auth errors (400, 401, 403, 404, etc.)
+        // Only retry if it is a transient error (500+ or rate limit 429) or if status is unknown (0)
+        const shouldRetry = status === 0 || status === 429 || (status >= 500 && status <= 599);
+        if (!shouldRetry) {
+          console.warn(`[AutoFill AI] Static error status ${status} detected. Aborting cascade.`);
+          break;
+        }
       }
     }
     throw lastError || new Error("All direct Gemini model attempts failed.");

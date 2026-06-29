@@ -1,0 +1,17 @@
+/* Autofill AI Global Animations Stylesheet */
+@keyframes af-pulse-wave {
+  0% {
+    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.6), inset 0 0 0 2px rgba(99, 102, 241, 0.6);
+    border-color: #6366f1 !important;
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgba(99, 102, 241, 0), inset 0 0 0 2px rgba(99, 102, 241, 0.2);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0), inset 0 0 0 0 rgba(99, 102, 241, 0);
+  }
+}
+.af-filled-pulse {
+  animation: af-pulse-wave 1.4s ease-out !important;
+  transition: all 0.2s ease;
+}

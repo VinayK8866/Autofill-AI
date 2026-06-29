@@ -1,5 +1,6 @@
 import { FormScraper, injectValue } from './scraper';
 import contentCss from './content.css?inline';
+import './global.css';
 
 function isContextValid(): boolean {
   try {
@@ -35,6 +36,7 @@ class MagicCommandDock {
   private aiProvider: string = 'cloud';
   private hasProfile: boolean = false;
   private isLoading: boolean = false;
+  private cleanupListeners: (() => void) | null = null;
 
   constructor() {
     if (!isContextValid()) return;
@@ -82,41 +84,44 @@ class MagicCommandDock {
   }
 
   private setupObserver() {
-    let timeout: ReturnType<typeof setTimeout> | null = null;
-    const throttledUpdate = () => {
-      if (timeout) clearTimeout(timeout);
-      timeout = setTimeout(() => this.updateDockState(), 400);
-    };
+    let lastScanTime = 0;
+    let throttleTimeout: ReturnType<typeof setTimeout> | null = null;
+    const SCAN_THROTTLE_MS = 1500; // Throttle scans to max once per 1.5 seconds
 
-    // Instantiate observer to watch for dynamic DOM updates to elements
-    this.observer = new MutationObserver((mutations) => {
+    const throttledUpdate = () => {
       if (!isContextValid()) {
+        if (this.cleanupListeners) {
+          this.cleanupListeners();
+          this.cleanupListeners = null;
+        }
         this.destroy();
         return;
       }
-      let shouldUpdate = false;
-      for (const mutation of mutations) {
-        if (mutation.addedNodes.length > 0 || mutation.removedNodes.length > 0) {
-          const elementsModified = Array.from(mutation.addedNodes).some(node =>
-            node instanceof HTMLElement && (
-              node.matches('input, textarea, select') ||
-              node.querySelector('input, textarea, select')
-            )
-          ) || Array.from(mutation.removedNodes).some(node =>
-            node instanceof HTMLElement && (
-              node.matches('input, textarea, select') ||
-              node.querySelector('input, textarea, select')
-            )
-          );
-          if (elementsModified) {
-            shouldUpdate = true;
-            break;
-          }
+
+      const now = Date.now();
+      const timeSinceLastScan = now - lastScanTime;
+
+      if (timeSinceLastScan >= SCAN_THROTTLE_MS) {
+        if (throttleTimeout) {
+          clearTimeout(throttleTimeout);
+          throttleTimeout = null;
         }
+        lastScanTime = now;
+        this.updateDockState();
+      } else if (!throttleTimeout) {
+        // Schedule a scan for the remaining duration of the throttle window
+        throttleTimeout = setTimeout(() => {
+          lastScanTime = Date.now();
+          throttleTimeout = null;
+          this.updateDockState();
+        }, SCAN_THROTTLE_MS - timeSinceLastScan);
       }
-      if (shouldUpdate) {
-        throttledUpdate();
-      }
+    };
+
+    // Lightweight MutationObserver that just detects general DOM tree updates
+    // without traversing mutation nodes.
+    this.observer = new MutationObserver(() => {
+      throttledUpdate();
     });
 
     this.observer.observe(document.body, {
@@ -124,9 +129,23 @@ class MagicCommandDock {
       subtree: true
     });
 
-    // Also trigger updates on window load and focus movements
-    window.addEventListener('load', throttledUpdate);
-    document.addEventListener('focusin', throttledUpdate, true);
+    const handleLoad = () => throttledUpdate();
+    const handleFocusIn = () => throttledUpdate();
+    const handleClick = () => throttledUpdate();
+
+    // Event listeners to react instantly when a user interacts with fields
+    window.addEventListener('load', handleLoad);
+    document.addEventListener('focusin', handleFocusIn, true);
+    document.addEventListener('click', handleClick, true);
+
+    this.cleanupListeners = () => {
+      window.removeEventListener('load', handleLoad);
+      document.removeEventListener('focusin', handleFocusIn, true);
+      document.removeEventListener('click', handleClick, true);
+      if (throttleTimeout) {
+        clearTimeout(throttleTimeout);
+      }
+    };
   }
 
 
@@ -211,7 +230,8 @@ class MagicCommandDock {
       });
     } else {
       const isLimitReached = this.aiProvider === 'cloud' && (
-        !this.authToken || (this.userPlan === 'Free Tier' && this.usageCount >= 50)
+        (!this.authToken && this.usageCount >= 10) ||
+        (this.authToken && this.userPlan === 'Free Tier' && this.usageCount >= 50)
       );
 
       let btnText = 'Magically Fill Form';
@@ -226,7 +246,7 @@ class MagicCommandDock {
       if (isLimitReached) {
         btnClass += ' limit-reached';
         btnText = (this.aiProvider === 'cloud' && !this.authToken)
-          ? 'Sign In to use Autofill AI'
+          ? 'Limit Reached: Sign Up for 50 Free Fills'
           : 'Limit Reached: Upgrade to Pro';
         btnIcon = `
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -332,6 +352,19 @@ class MagicCommandDock {
         tab.addEventListener('click', (e) => {
           const target = e.currentTarget as HTMLButtonElement;
           const persona = target.getAttribute('data-persona') || 'default';
+          
+          if ((persona === 'qa' || persona === 'b2b') && this.userPlan !== 'Pro Plan') {
+            const errorAlert = this.dockContainer?.querySelector('#af-error-alert') as HTMLDivElement;
+            if (errorAlert) {
+              errorAlert.style.display = 'flex';
+              const errorText = errorAlert.querySelector('.af-error-text');
+              if (errorText) {
+                errorText.textContent = "QA and B2B personas require a Pro Plan.";
+              }
+            }
+            return;
+          }
+          
           this.currentPersona = persona;
 
           // Force repaint to dynamically update active selection, button class, text, and icons
@@ -344,6 +377,17 @@ class MagicCommandDock {
       // Custom prompt dropdown toggle
       const customTrigger = this.dockContainer.querySelector('#af-toggle-custom-trigger');
       customTrigger?.addEventListener('click', () => {
+        if (this.userPlan !== 'Pro Plan') {
+          const errorAlert = this.dockContainer?.querySelector('#af-error-alert') as HTMLDivElement;
+          if (errorAlert) {
+            errorAlert.style.display = 'flex';
+            const errorText = errorAlert.querySelector('.af-error-text');
+            if (errorText) {
+              errorText.textContent = "Custom instructions require a Pro Plan.";
+            }
+          }
+          return;
+        }
         const container = this.dockContainer?.querySelector('.af-custom-prompt-container');
         if (container) {
           container.classList.toggle('visible');
@@ -547,6 +591,22 @@ class MagicCommandDock {
     const persona = overridePersona || this.currentPersona;
     const prompt = overridePrompt !== undefined ? overridePrompt : (this.customPrompts[persona] || '');
 
+    if ((persona === 'qa' || persona === 'b2b' || prompt) && this.userPlan !== 'Pro Plan') {
+      this.isLoading = false;
+      const errorAlert = this.dockContainer?.querySelector('#af-error-alert') as HTMLDivElement;
+      if (errorAlert) {
+        errorAlert.style.display = 'flex';
+        const errorText = errorAlert.querySelector('.af-error-text');
+        if (errorText) {
+          errorText.textContent = "Pro Plan required for advanced options.";
+        }
+      }
+      setTimeout(() => {
+        this.updateDockState();
+      }, 3000);
+      return { success: false, error: 'Pro Plan required for advanced options' };
+    }
+
     this.isLoading = true;
 
     const fillBtn = this.dockContainer?.querySelector('#af-fill-btn') as HTMLButtonElement;
@@ -560,7 +620,8 @@ class MagicCommandDock {
     }
 
     const isLimitReached = this.aiProvider === 'cloud' && (
-      !this.authToken || (this.userPlan === 'Free Tier' && this.usageCount >= 50)
+      (!this.authToken && this.usageCount >= 10) ||
+      (this.authToken && this.userPlan === 'Free Tier' && this.usageCount >= 50)
     );
 
     if (isLimitReached) {
@@ -632,9 +693,6 @@ class MagicCommandDock {
       });
 
       if (response && !response.error) {
-        // Guarantee animation keyframes are registered on the host page stylesheet
-        this.injectGlobalAnimationStyles();
-
         // Inject values sequentially with dynamic wave glow pulses
         let count = 0;
         Object.entries(response).forEach(([fieldId, value]) => {
@@ -642,7 +700,9 @@ class MagicCommandDock {
             injectValue(fieldId, value as string);
 
             // Add wave pulse styling to show fill activity
-            const inputEl = document.getElementById(fieldId) || document.querySelector(`[name="${CSS.escape(fieldId)}"]`);
+            const inputEl = document.querySelector(`[data-autofill-id="${CSS.escape(fieldId)}"]`) ||
+                            document.getElementById(fieldId) || 
+                            document.querySelector(`[name="${CSS.escape(fieldId)}"]`);
             if (inputEl) {
               inputEl.classList.add('af-filled-pulse');
               setTimeout(() => {
@@ -725,34 +785,11 @@ class MagicCommandDock {
     return rawError;
   }
 
-  private injectGlobalAnimationStyles() {
-    const styleId = 'autofill-ai-global-animations';
-    if (document.getElementById(styleId)) return;
-
-    const globalStyle = document.createElement('style');
-    globalStyle.id = styleId;
-    globalStyle.textContent = `
-      @keyframes af-pulse-wave {
-        0% {
-          box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.6), inset 0 0 0 2px rgba(99, 102, 241, 0.6);
-          border-color: #6366f1 !important;
-        }
-        50% {
-          box-shadow: 0 0 0 10px rgba(99, 102, 241, 0), inset 0 0 0 2px rgba(99, 102, 241, 0.2);
-        }
-        100% {
-          box-shadow: 0 0 0 0 rgba(99, 102, 241, 0), inset 0 0 0 0 rgba(99, 102, 241, 0);
-        }
-      }
-      .af-filled-pulse {
-        animation: af-pulse-wave 1.4s ease-out !important;
-        transition: all 0.2s ease;
-      }
-    `;
-    document.head.appendChild(globalStyle);
-  }
-
   private destroy() {
+    if (this.cleanupListeners) {
+      this.cleanupListeners();
+      this.cleanupListeners = null;
+    }
     if (this.observer) {
       this.observer.disconnect();
       this.observer = null;

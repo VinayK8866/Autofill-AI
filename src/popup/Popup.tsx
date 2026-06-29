@@ -63,10 +63,14 @@ export const Popup = () => {
       const token = result.authToken as string || '';
       const currentProvider = result.aiProvider as string || 'cloud';
 
-      // Limit check logic (Monthly limit for auth free tier, Block cloud anonymous)
+      // Limit check logic (Monthly limit for auth free tier, Anonymous limit for unauth cloud)
       if (currentProvider === 'cloud' && !token) {
-        setLimitReached(true);
-        setLimitErrorMessage('Authentication Required. Sign in inside Settings to use Autofill AI!');
+        if (usage >= 10) {
+          setLimitReached(true);
+          setLimitErrorMessage('Anonymous fill limit reached (10/10). Sign up inside Settings to get 50 free fills!');
+        } else {
+          setLimitReached(false);
+        }
       } else if (plan === 'Free Tier' && usage >= 50 && currentProvider === 'cloud') {
         setLimitReached(true);
         setLimitErrorMessage('Monthly fill limit reached (50/50). Upgrade to Pro inside Settings!');
@@ -75,7 +79,8 @@ export const Popup = () => {
       }
 
       const savedPersona = result.lastActivePersona as 'default' | 'profile' | 'qa' | 'b2b' | undefined;
-      if (savedPersona) {
+      const finalPlan = result.userPlan as string || 'Free Tier';
+      if (savedPersona && (savedPersona === 'default' || savedPersona === 'profile' || finalPlan === 'Pro Plan')) {
         setPersona(savedPersona);
       } else {
         setPersona(profileExists ? 'profile' : 'default');
@@ -106,8 +111,12 @@ export const Popup = () => {
               chrome.storage.local.set({ usageCount: currentUsage });
 
               if (currentProvider === 'cloud' && !token) {
-                setLimitReached(true);
-                setLimitErrorMessage('Authentication Required. Sign in inside Settings to use Autofill AI!');
+                if (currentUsage >= 10) {
+                  setLimitReached(true);
+                  setLimitErrorMessage('Anonymous fill limit reached (10/10). Sign up inside Settings to get 50 free fills!');
+                } else {
+                  setLimitReached(false);
+                }
               } else if (currentPlan === 'Free Tier' && currentUsage >= 50 && currentProvider === 'cloud') {
                 setLimitReached(true);
                 setLimitErrorMessage('Monthly fill limit reached (50/50). Upgrade to Pro inside Settings!');
@@ -136,8 +145,12 @@ export const Popup = () => {
         setAiProvider(currentProvider);
 
         if (currentProvider === 'cloud' && !currentToken) {
-          setLimitReached(true);
-          setLimitErrorMessage('Authentication Required. Sign in inside Settings to use Autofill AI!');
+          if (currentUsage >= 10) {
+            setLimitReached(true);
+            setLimitErrorMessage('Anonymous fill limit reached (10/10). Sign up inside Settings to get 50 free fills!');
+          } else {
+            setLimitReached(false);
+          }
         } else if (currentPlan === 'Free Tier' && currentUsage >= 50 && currentProvider === 'cloud') {
           setLimitReached(true);
           setLimitErrorMessage('Monthly fill limit reached (50/50). Upgrade to Pro inside Settings!');
@@ -221,6 +234,12 @@ export const Popup = () => {
   }, []);
 
   const changePersona = (newPersona: 'default' | 'profile' | 'qa' | 'b2b') => {
+    if ((newPersona === 'qa' || newPersona === 'b2b') && userPlan !== 'Pro Plan') {
+      setErrorMessage("The QA Test and B2B Corp personas require a paid Pro Plan SaaS subscription.");
+      setLimitReached(true);
+      setLimitErrorMessage("The QA Test and B2B Corp personas require a paid Pro Plan SaaS subscription.");
+      return;
+    }
     setPersona(newPersona);
     chrome.storage.local.set({ lastActivePersona: newPersona });
   };
@@ -378,9 +397,9 @@ export const Popup = () => {
       };
     }
     return {
-      label: 'Autofill AI',
+      label: 'Autofill AI (Anon)',
       icon: <Globe className="w-3.5 h-3.5" />,
-      desc: 'Unlock 50 free fills'
+      desc: `${Math.max(0, 10 - usageCount)}/10 left`
     };
   };
 
@@ -392,11 +411,9 @@ export const Popup = () => {
     if (loading) return "Magically Filling...";
     if (limitReached) {
       if (aiProvider === 'cloud' && !authToken) {
-        return "Sign In to use Autofill AI";
+        return "Limit Reached: Sign Up for 50 Free Fills!";
       }
-      return !authToken
-        ? "Limit Reached: Sign Up for 50 Free Fills!"
-        : "Limit Reached: Upgrade to Pro";
+      return "Limit Reached: Upgrade to Pro";
     }
     if (persona === 'profile' && !hasProfile) return "Configure Profile Card";
 
@@ -547,7 +564,15 @@ export const Popup = () => {
             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 flex justify-between items-center">
               <span>Filling Persona</span>
               <button
-                onClick={() => setShowCustomPrompt(!showCustomPrompt)}
+                onClick={() => {
+                  if (userPlan !== 'Pro Plan') {
+                    setErrorMessage("Custom instructions require a paid Pro Plan SaaS subscription.");
+                    setLimitReached(true);
+                    setLimitErrorMessage("Custom instructions require a paid Pro Plan SaaS subscription.");
+                    return;
+                  }
+                  setShowCustomPrompt(!showCustomPrompt);
+                }}
                 disabled={formFields === 0}
                 className={`font-bold text-[9px] uppercase tracking-normal transition-colors ${formFields === 0
                   ? 'text-slate-300 cursor-not-allowed'

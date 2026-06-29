@@ -14,7 +14,13 @@
 export default {
   async fetch(request, env, ctx) {
     const origin = request.headers.get("Origin") || "";
-    const isAllowed = origin.startsWith("chrome-extension://") || origin.endsWith("vinaykondabattula.workers.dev");
+    
+    // Support single or comma-separated list of allowed extension origins to allow dev and prod side-by-side
+    const allowedExtensionIds = env.ALLOWED_EXTENSION_ID 
+      ? env.ALLOWED_EXTENSION_ID.split(",").map(id => id.trim())
+      : ["chrome-extension://your_extension_id_here"];
+
+    const isAllowed = allowedExtensionIds.includes(origin) || origin.endsWith("vinaykondabattula.workers.dev");
     const allowedOrigin = isAllowed ? origin : "null";
 
     const url = new URL(request.url);
@@ -76,7 +82,7 @@ export default {
 
     const corsHeaders = {
       "Access-Control-Allow-Origin": allowedOrigin,
-      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type, Authorization",
     };
 
@@ -87,57 +93,74 @@ export default {
       });
     }
 
-    if (request.method !== "POST") {
+    const isConfigRequest = url.pathname === "/config";
+
+    if (request.method !== "POST" && !(request.method === "GET" && isConfigRequest)) {
       return new Response("Method Not Allowed", { status: 405 });
     }
+
+    // Handle dynamic client configuration request (unauthenticated)
+    if (isConfigRequest) {
+      const checkoutUrl = env.LEMON_SQUEEZY_CHECKOUT_URL || "https://autofill-ai.lemonsqueezy.com/buy/mock-variant-id";
+      return new Response(JSON.stringify({ checkoutUrl }), {
+        headers: {
+          "Content-Type": "application/json",
+          ...corsHeaders
+        }
+      });
+    }
+
     const isUsageRequest = url.pathname === "/usage";
-    const isWebhookRequest = url.pathname === "/webhook/razorpay";
+    const isWebhookRequest = url.pathname === "/webhook/lemonsqueezy";
 
     try {
-      // Handle Razorpay Webhooks first
+      // Handle Lemon Squeezy Webhooks first
       if (isWebhookRequest) {
-        const signatureHeader = request.headers.get("X-Razorpay-Signature");
+        const signatureHeader = request.headers.get("X-Signature");
         const bodyText = await request.text();
-        const secret = env.RAZORPAY_WEBHOOK_SECRET;
+        const secret = env.LEMON_SQUEEZY_WEBHOOK_SECRET;
 
         // Verify signature (fail-closed)
         if (!secret) {
-          console.error("RAZORPAY_WEBHOOK_SECRET is not configured in the environment.");
+          console.error("LEMON_SQUEEZY_WEBHOOK_SECRET is not configured in the environment.");
           return new Response("Webhook verification failed: Secret configuration missing", { status: 500 });
         }
 
-        const isVerified = await verifyRazorpaySignature(bodyText, signatureHeader, secret);
+        const isVerified = await verifyLemonSqueezySignature(bodyText, signatureHeader, secret);
         if (!isVerified) {
-          return new Response("Invalid Razorpay Webhook Signature", { status: 400 });
+          return new Response("Invalid Lemon Squeezy Webhook Signature", { status: 400 });
         }
 
-        const razorpayEvent = JSON.parse(bodyText);
-        const eventType = razorpayEvent.event;
+        const payload = JSON.parse(bodyText);
+        const eventName = payload.meta ? payload.meta.event_name : null;
+        const customData = payload.meta ? payload.meta.custom_data : null;
+        const userId = customData ? (customData.user_id || customData.userId) : null;
 
-        if (eventType === "payment.captured" || eventType === "order.paid") {
-          const payment = razorpayEvent.payload.payment.entity;
-          const userId = payment.notes ? (payment.notes.userId || payment.notes.userid) : null;
+        if (userId) {
+          let updatedPlan = "Free Tier";
+          let customerPortal = "";
+          
+          if (eventName === "subscription_created" || eventName === "subscription_updated") {
+            const attributes = payload.data ? payload.data.attributes : null;
+            const status = attributes ? attributes.status : null;
+            customerPortal = attributes && attributes.urls ? attributes.urls.customer_portal : "";
 
-          if (userId && env.USERS_KV) {
-            await env.USERS_KV.put(`user:plan:${userId}`, "Pro Plan");
-            console.log(`Successfully upgraded user ${userId} to Pro Plan via Razorpay payment`);
+            if (status === "active" || status === "on_trial") {
+              updatedPlan = "Pro Plan";
+            }
           }
-        } else if (eventType === "subscription.activated" || eventType === "subscription.charged") {
-          const subscription = razorpayEvent.payload.subscription.entity;
-          const userId = subscription.notes ? (subscription.notes.userId || subscription.notes.userid) : null;
 
-          if (userId && env.USERS_KV) {
-            await env.USERS_KV.put(`user:plan:${userId}`, "Pro Plan");
-            console.log(`Successfully activated Pro plan for user ${userId} via Razorpay subscription`);
-          }
-        } else if (eventType === "subscription.cancelled" || eventType === "subscription.halted") {
-          const subscription = razorpayEvent.payload.subscription.entity;
-          const userId = subscription.notes ? (subscription.notes.userId || subscription.notes.userid) : null;
+          // 1. Sync to Supabase DB if configured
+          await updateSupabaseProfilePlan(userId, updatedPlan, customerPortal, env);
 
-          if (userId && env.USERS_KV) {
-            await env.USERS_KV.put(`user:plan:${userId}`, "Free Tier");
-            console.log(`Successfully downgraded user ${userId} to Free Tier due to Razorpay subscription cancellation`);
+          // 2. Sync to KV (for backward compatibility/speed)
+          if (env.USERS_KV) {
+            await env.USERS_KV.put(`user:plan:${userId}`, updatedPlan);
+            if (customerPortal) {
+              await env.USERS_KV.put(`user:customer_portal:${userId}`, customerPortal);
+            }
           }
+          console.log(`Successfully updated plan for user ${userId} to ${updatedPlan} via Lemon Squeezy webhook`);
         }
 
         return new Response(JSON.stringify({ received: true }), {
@@ -182,20 +205,31 @@ export default {
       // 3. Retrieve plan & usage count
       let userPlan = "Free Tier";
       let usageCount = 0;
+      let customerPortalUrl = "";
 
       if (userTier === "authenticated") {
-        if (env.USERS_KV) {
+        // Try Supabase DB lookup first
+        const dbProfile = await getSupabaseProfile(userId, env);
+        if (dbProfile) {
+          userPlan = dbProfile.plan || "Free Tier";
+          usageCount = parseInt(dbProfile.usage_count || "0", 10);
+          customerPortalUrl = dbProfile.customer_portal_url || "";
+        } else if (env.USERS_KV) {
+          // Fallback to KV if DB fails/is unconfigured
           userPlan = await env.USERS_KV.get(`user:plan:${userId}`) || "Free Tier";
           usageCount = parseInt(await env.USERS_KV.get(`user:fills:${userId}`) || "0", 10);
-        } else {
-          userPlan = "Free Tier";
-          usageCount = 0;
+          customerPortalUrl = await env.USERS_KV.get(`user:customer_portal:${userId}`) || "";
+        }
+      } else {
+        userPlan = "Anonymous Tier";
+        if (env.USERS_KV) {
+          usageCount = parseInt(await env.USERS_KV.get(`anon:fills:${userId}`) || "0", 10);
         }
       }
 
       // 4. Handle Usage Info Request
       if (isUsageRequest) {
-        return new Response(JSON.stringify({ usageCount, userPlan }), {
+        return new Response(JSON.stringify({ usageCount, userPlan, customerPortalUrl }), {
           headers: {
             "Content-Type": "application/json",
             ...corsHeaders
@@ -215,19 +249,20 @@ export default {
         });
       }
 
-      // Block unauthenticated calls to expensive LLM endpoints
-      if (userTier !== "authenticated") {
-        return new Response(JSON.stringify({ error: "Authentication Required. Please log in or sign up inside extension settings to use Autofill AI." }), {
-          status: 401,
-          headers: {
-            "Content-Type": "application/json",
-            ...corsHeaders
-          }
-        });
-      }
-
       // 5. Check Limits before Generation
       if (incrementUsage !== false) {
+        if (userPlan === "Anonymous Tier" && usageCount >= 10) {
+          return new Response(
+            JSON.stringify({ error: "Anonymous fill limit reached (10/10). Please sign up or log in inside settings to unlock 50 free fills!" }),
+            { 
+              status: 402, 
+              headers: { 
+                "Content-Type": "application/json", 
+                ...corsHeaders
+              } 
+            }
+          );
+        }
         if (userPlan === "Free Tier" && usageCount >= 50) {
           return new Response(
             JSON.stringify({ error: "Monthly fill limit reached (50/50). Upgrade to Pro inside Options!" }),
@@ -319,10 +354,20 @@ export default {
               // Not JSON, use raw errText
             }
             lastError = new Error(`[${res.status}] ${cleanErr}`);
+
+            // Abort cascade loop for static client/auth errors (400, 401, 403, 404, etc.)
+            // Only retry if it is a transient server error (500, 502, 503, 504) or rate limit (429)
+            const shouldRetry = res.status === 429 || (res.status >= 500 && res.status <= 599);
+            if (!shouldRetry) {
+              console.warn(`[AutoFill AI Proxy] Static error status ${res.status} detected. Aborting cascade.`);
+              break; 
+            }
           }
         } catch (err) {
           if (err.name === "AbortError") {
             lastError = new Error("Request timed out after 25 seconds.");
+            console.warn(`[AutoFill AI Proxy] Model ${modelName} timed out. Aborting cascade.`);
+            break; // Abort cascade immediately on timeout
           } else {
             lastError = err;
           }
@@ -353,9 +398,24 @@ export default {
       // 6. Increment usage after successful API call
       let newUsageCount = usageCount;
       if (incrementUsage !== false) {
-        newUsageCount = usageCount + 1;
-        if (env.USERS_KV && userTier === "authenticated") {
-          await env.USERS_KV.put(`user:fills:${userId}`, newUsageCount.toString());
+        if (userTier === "authenticated") {
+          // Try atomic increment in Supabase first
+          const dbNewCount = await incrementSupabaseUsage(userId, env);
+          if (dbNewCount !== null) {
+            newUsageCount = dbNewCount;
+          } else {
+            // Fallback to KV read-modify-write if DB fails
+            newUsageCount = usageCount + 1;
+            if (env.USERS_KV) {
+              await env.USERS_KV.put(`user:fills:${userId}`, newUsageCount.toString());
+            }
+          }
+        } else {
+          // Anonymous user: increment in KV
+          newUsageCount = usageCount + 1;
+          if (env.USERS_KV) {
+            await env.USERS_KV.put(`anon:fills:${userId}`, newUsageCount.toString());
+          }
         }
       }
 
@@ -529,9 +589,9 @@ function base64UrlToUint8Array(base64Url) {
 }
 
 /**
- * Razorpay Signature Verification Helper (Native Web Crypto HMAC SHA-256)
+ * Lemon Squeezy Signature Verification Helper (Native Web Crypto HMAC SHA-256)
  */
-async function verifyRazorpaySignature(bodyText, signatureHeader, secret) {
+async function verifyLemonSqueezySignature(bodyText, signatureHeader, secret) {
   if (!signatureHeader || !secret) return false;
   
   const encoder = new TextEncoder();
@@ -566,4 +626,90 @@ function hexToUint8Array(hexString) {
     result[i] = parseInt(hexString.substring(i * 2, i * 2 + 2), 16);
   }
   return result;
+}
+
+/**
+ * Supabase DB Integration Helpers
+ */
+async function getSupabaseProfile(userId, env) {
+  const supabaseUrl = env.SUPABASE_URL;
+  const supabaseKey = env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !supabaseKey) return null;
+
+  try {
+    const url = `${supabaseUrl}/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}&select=plan,usage_count,customer_portal_url`;
+    const res = await fetch(url, {
+      method: "GET",
+      headers: {
+        "apikey": supabaseKey,
+        "Authorization": `Bearer ${supabaseKey}`
+      }
+    });
+    if (!res.ok) {
+      console.warn(`[Supabase] Profile lookup returned status ${res.status}`);
+      return null;
+    }
+    const data = await res.json();
+    return data[0] || null;
+  } catch (err) {
+    console.error("[Supabase] Profile lookup failed:", err.message || err);
+    return null;
+  }
+}
+
+async function incrementSupabaseUsage(userId, env) {
+  const supabaseUrl = env.SUPABASE_URL;
+  const supabaseKey = env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !supabaseKey) return null;
+
+  try {
+    const url = `${supabaseUrl}/rest/v1/rpc/increment_usage`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "apikey": supabaseKey,
+        "Authorization": `Bearer ${supabaseKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ user_id: userId })
+    });
+    if (!res.ok) {
+      console.warn(`[Supabase] Atomic increment RPC returned status ${res.status}`);
+      return null;
+    }
+    const data = await res.json();
+    return typeof data === "number" ? data : (data && typeof data.usage_count === "number" ? data.usage_count : null);
+  } catch (err) {
+    console.error("[Supabase] Atomic increment RPC failed:", err.message || err);
+    return null;
+  }
+}
+
+async function updateSupabaseProfilePlan(userId, plan, customerPortalUrl, env) {
+  const supabaseUrl = env.SUPABASE_URL;
+  const supabaseKey = env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !supabaseKey) return false;
+
+  try {
+    const url = `${supabaseUrl}/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}`;
+    const res = await fetch(url, {
+      method: "POST", // POST with resolution=merge-duplicates does upsert
+      headers: {
+        "apikey": supabaseKey,
+        "Authorization": `Bearer ${supabaseKey}`,
+        "Content-Type": "application/json",
+        "Prefer": "resolution=merge-duplicates"
+      },
+      body: JSON.stringify({
+        id: userId,
+        plan: plan,
+        customer_portal_url: customerPortalUrl || "",
+        updated_at: new Date().toISOString()
+      })
+    });
+    return res.ok;
+  } catch (err) {
+    console.error("[Supabase] Profile upsert failed:", err.message || err);
+    return false;
+  }
 }

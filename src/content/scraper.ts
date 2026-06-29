@@ -131,8 +131,11 @@ export class FormScraper {
       }
 
       const label = this.getLabel(el);
-      const id = el.id || el.getAttribute('name') || `${type}-field-${index}`;
-      if (!el.id) el.id = id;
+      let id = el.getAttribute('data-autofill-id');
+      if (!id) {
+        id = el.id || el.getAttribute('name') || `${type}-field-${index}`;
+        el.setAttribute('data-autofill-id', id);
+      }
 
       const field: FormField = {
         id: id,
@@ -211,31 +214,38 @@ export class FormScraper {
  * Robustly injects value into an element, bypassing React/Vue virtual DOM limitations.
  */
 export const injectValue = (fieldId: string, value: string) => {
-  // Support selector-based or ID-based queries, including shadow roots
-  let el = document.getElementById(fieldId) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
-  if (!el) {
-    try {
-      el = document.querySelector(`[name="${CSS.escape(fieldId)}"]`) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
-    } catch {
-      // Ignored
-    }
-  }
+  // Find the element by data-autofill-id first
+  let el = document.querySelector(`[data-autofill-id="${CSS.escape(fieldId)}"]`) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
   
   if (!el) {
-    // Fallback recursive search by ID or Name
+    // Recursive search by dataset attribute, ID, or Name, including shadow roots
     const all = document.querySelectorAll('*');
     for (const node of Array.from(all)) {
-      if (node.id === fieldId || node.getAttribute('name') === fieldId) {
+      if (node instanceof HTMLElement && node.dataset.autofillId === fieldId) {
         el = node as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
         break;
       }
       if (node.shadowRoot) {
-        const shadowNode = node.shadowRoot.getElementById(fieldId) || node.shadowRoot.querySelector(`[name="${CSS.escape(fieldId)}"]`);
+        const shadowNode = node.shadowRoot.querySelector(`[data-autofill-id="${CSS.escape(fieldId)}"]`) || 
+                           node.shadowRoot.getElementById(fieldId) || 
+                           node.shadowRoot.querySelector(`[name="${CSS.escape(fieldId)}"]`);
         if (shadowNode) {
           el = shadowNode as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
           break;
         }
       }
+    }
+  }
+
+  // Fallbacks for original ID or Name
+  if (!el) {
+    el = document.getElementById(fieldId) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+  }
+  if (!el) {
+    try {
+      el = document.querySelector(`[name="${CSS.escape(fieldId)}"]`) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+    } catch {
+      // Ignored
     }
   }
 
