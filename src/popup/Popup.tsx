@@ -443,20 +443,20 @@ export const Popup = () => {
         <div className="p-4 pb-1">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
-              <div className="w-10 h-10 bg-indigo-600 rounded-none flex items-center justify-center shadow-lg transform rotate-3">
+              <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shadow-lg transform rotate-3">
                 <Sparkles className="w-6 h-6 text-white fill-white/20" />
               </div>
               <div>
                 <h1 className="text-xl font-black text-slate-900 tracking-tight leading-none">AutoFill AI</h1>
                 <p className="text-[10px] font-bold text-slate-400 mt-1 flex items-center gap-1 uppercase tracking-widest">
-                  <span className={`w-1.5 h-1.5 rounded-none ${formFields > 0 ? 'bg-emerald-500 animate-ping' : 'bg-slate-300'}`} />
+                  <span className={`w-1.5 h-1.5 rounded-full ${formFields > 0 ? 'bg-emerald-500 animate-ping' : 'bg-slate-300'}`} />
                   {formFields > 0 ? `${formFields} Elements Detected` : 'No Forms Detected'}
                 </p>
               </div>
             </div>
             <button
               onClick={() => chrome.runtime.openOptionsPage()}
-              className="p-2.5 rounded-none bg-slate-100/50 hover:bg-slate-200/50 text-slate-600 transition-all hover:rotate-12 cursor-pointer"
+              className="p-2.5 rounded-xl bg-slate-100/50 hover:bg-slate-200/50 text-slate-600 transition-all hover:rotate-12 cursor-pointer"
               title="Open Settings"
             >
               <Settings className="w-4.5 h-4.5" />
@@ -469,9 +469,9 @@ export const Popup = () => {
 
           {/* Connection Status Card */}
           <div className="px-6 mb-3">
-            <div className="bg-gradient-to-br from-indigo-50/40 via-purple-50/20 to-slate-50/50 backdrop-blur-xl border border-indigo-100/40 rounded-none p-3 flex items-center justify-between shadow-sm shadow-indigo-100/20 animate-in fade-in duration-300">
+            <div className="bg-gradient-to-br from-indigo-50/40 via-purple-50/20 to-slate-50/50 backdrop-blur-xl border border-indigo-100/40 rounded-2xl p-3 flex items-center justify-between shadow-sm shadow-indigo-100/20 animate-in fade-in duration-300">
               <div className="flex items-center gap-3">
-                <div className="p-2 rounded-none bg-gradient-to-br from-indigo-500 to-purple-600 shadow-md shadow-indigo-200/50 text-white">
+                <div className="p-2 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 shadow-md shadow-indigo-200/50 text-white">
                   {mode.icon}
                 </div>
                 <div>
@@ -484,11 +484,11 @@ export const Popup = () => {
                   </p>
                 </div>
               </div>
-              <div className={`px-2 py-1 rounded-none border flex items-center gap-1 shadow-sm ${limitReached
+              <div className={`px-2 py-1 rounded-full border flex items-center gap-1 shadow-sm ${limitReached
                 ? 'bg-rose-50 border-rose-100 text-rose-600 shadow-rose-50'
                 : 'bg-emerald-50 border-emerald-100 text-emerald-700 shadow-emerald-50'
                 }`}>
-                <span className={`w-1.5 h-1.5 rounded-none ${limitReached ? 'bg-rose-500' : 'bg-emerald-500 animate-pulse'}`} />
+                <span className={`w-1.5 h-1.5 rounded-full ${limitReached ? 'bg-rose-500' : 'bg-emerald-500 animate-pulse'}`} />
                 <span className="text-[10px] font-black uppercase tracking-widest leading-none">
                   {limitReached ? 'Limited' : 'Active'}
                 </span>
@@ -498,9 +498,9 @@ export const Popup = () => {
 
           {/* Quick Interface Toggle Settings */}
           <div className="px-6 mb-3">
-            <div className="bg-white/40 border border-white/60 rounded-none p-2.5 flex items-center justify-between shadow-sm animate-in fade-in duration-300">
+            <div className="bg-white/40 border border-white/60 rounded-2xl p-2.5 flex items-center justify-between shadow-sm animate-in fade-in duration-300">
               <div className="flex items-center gap-2.5">
-                <div className="p-2 rounded-none bg-indigo-600/10 text-indigo-600">
+                <div className="p-2 rounded-xl bg-indigo-600/10 text-indigo-600">
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                     <rect width="18" height="18" x="3" y="3" rx="2" />
                     <path d="M9 3v18" />
@@ -513,12 +513,12 @@ export const Popup = () => {
               </div>
               <button
                 onClick={toggleFloatingDock}
-                className={`w-9 h-5 rounded-none p-0.5 transition-colors focus:outline-none cursor-pointer ${enableFloatingDock ? 'bg-indigo-600' : 'bg-slate-300'
+                className={`w-9 h-5 rounded-full p-0.5 transition-colors focus:outline-none cursor-pointer ${enableFloatingDock ? 'bg-indigo-600' : 'bg-slate-300'
                   }`}
                 title={enableFloatingDock ? "Hide in-page dock" : "Show in-page dock"}
               >
                 <div
-                  className={`bg-white w-4 h-4 rounded-none shadow-md transform transition-transform duration-200 ${enableFloatingDock ? 'translate-x-4' : 'translate-x-0'
+                  className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-200 ${enableFloatingDock ? 'translate-x-4' : 'translate-x-0'
                     }`}
                 />
               </button>
@@ -527,11 +527,11 @@ export const Popup = () => {
 
           {/* Form Insights */}
           <div className="px-6 mb-3 flex justify-between gap-3">
-            <div className="flex-1 bg-white/40 border border-white/60 p-2.5 rounded-none text-center">
+            <div className="flex-1 bg-white/40 border border-white/60 p-2.5 rounded-2xl text-center">
               <p className="text-[18px] font-black text-slate-800 mb-0">{formFields}</p>
               <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Fields Found</p>
             </div>
-            <div className="flex-1 bg-indigo-50/50 border border-indigo-100 p-2.5 rounded-none text-center">
+            <div className="flex-1 bg-indigo-50/50 border border-indigo-100 p-2.5 rounded-2xl text-center">
               <p className="text-[18px] font-black text-indigo-600 mb-0">~{(formFields * 1.5).toFixed(0)}s</p>
               <p className="text-[9px] font-bold text-indigo-400 uppercase tracking-widest">Time Saved</p>
             </div>
@@ -556,7 +556,7 @@ export const Popup = () => {
               <button
                 onClick={() => changePersona('default')}
                 disabled={formFields === 0}
-                className={`p-2 h-8 rounded-none text-center text-xs font-bold border transition-all flex items-center justify-center gap-1.5 ${formFields === 0
+                className={`p-2 h-8 rounded-xl text-center text-xs font-bold border transition-all flex items-center justify-center gap-1.5 ${formFields === 0
                   ? 'bg-slate-100/50 border-slate-200/50 text-slate-400 cursor-not-allowed'
                   : persona === 'default'
                     ? 'bg-indigo-600 border-indigo-600 text-white shadow-md shadow-indigo-200 cursor-pointer'
@@ -569,7 +569,7 @@ export const Popup = () => {
               <button
                 onClick={() => changePersona('profile')}
                 disabled={formFields === 0}
-                className={`p-2 h-8 rounded-none text-center text-xs font-bold border transition-all flex items-center justify-center gap-1.5 relative ${formFields === 0
+                className={`p-2 h-8 rounded-xl text-center text-xs font-bold border transition-all flex items-center justify-center gap-1.5 relative ${formFields === 0
                   ? 'bg-slate-100/50 border-slate-200/50 text-slate-400 cursor-not-allowed'
                   : persona === 'profile'
                     ? 'bg-indigo-600 border-indigo-600 text-white shadow-md shadow-indigo-200 cursor-pointer'
@@ -579,13 +579,13 @@ export const Popup = () => {
                 <User className="w-3.5 h-3.5" />
                 <span>My Profile</span>
                 {formFields > 0 && !hasProfile && (
-                  <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-amber-500 rounded-none border border-white" title="Profile not configured" />
+                  <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-amber-500 rounded-full border border-white" title="Profile not configured" />
                 )}
               </button>
               <button
                 onClick={() => changePersona('qa')}
                 disabled={formFields === 0}
-                className={`p-2 h-8 rounded-none text-center text-xs font-bold border transition-all flex items-center justify-center gap-1.5 ${formFields === 0
+                className={`p-2 h-8 rounded-xl text-center text-xs font-bold border transition-all flex items-center justify-center gap-1.5 ${formFields === 0
                   ? 'bg-slate-100/50 border-slate-200/50 text-slate-400 cursor-not-allowed'
                   : persona === 'qa'
                     ? 'bg-indigo-600 border-indigo-600 text-white shadow-md shadow-indigo-200 cursor-pointer'
@@ -598,7 +598,7 @@ export const Popup = () => {
               <button
                 onClick={() => changePersona('b2b')}
                 disabled={formFields === 0}
-                className={`p-2 h-8 rounded-none text-center text-xs font-bold border transition-all flex items-center justify-center gap-1.5 ${formFields === 0
+                className={`p-2 h-8 rounded-xl text-center text-xs font-bold border transition-all flex items-center justify-center gap-1.5 ${formFields === 0
                   ? 'bg-slate-100/50 border-slate-200/50 text-slate-400 cursor-not-allowed'
                   : persona === 'b2b'
                     ? 'bg-indigo-600 border-indigo-600 text-white shadow-md shadow-indigo-200 cursor-pointer'
@@ -618,14 +618,14 @@ export const Popup = () => {
                   onChange={(e) => changeCustomPrompt(e.target.value)}
                   placeholder="e.g. A developer from Seattle named Jane who loves coding..."
                   rows={2}
-                  className="w-full text-xs rounded-none border border-slate-200 focus:border-indigo-500 focus:outline-none p-2.5 resize-none font-sans bg-slate-50/50 backdrop-blur-md"
+                  className="w-full text-xs rounded-xl border border-slate-200 focus:border-indigo-500 focus:outline-none p-2.5 resize-none font-sans bg-slate-50/50 backdrop-blur-md"
                 />
               </div>
             )}
 
             {/* Unconfigured Profile Alert */}
             {persona === 'profile' && !hasProfile && formFields > 0 && (
-              <div className="mt-2 flex items-center gap-2 text-amber-600 bg-amber-50/80 px-3.5 py-2.5 rounded-none border border-amber-100/80 text-[10px] font-semibold animate-in fade-in duration-300">
+              <div className="mt-2 flex items-center gap-2 text-amber-600 bg-amber-50/80 px-3.5 py-2.5 rounded-2xl border border-amber-100/80 text-[10px] font-semibold animate-in fade-in duration-300">
                 <AlertCircle className="w-4 h-4 shrink-0" />
                 <div className="flex-1 leading-normal">
                   Your profile card is empty.
@@ -645,7 +645,7 @@ export const Popup = () => {
             <button
               onClick={handleFill}
               disabled={loading || formFields === 0}
-              className={`w-full group relative h-12 rounded-none overflow-hidden transition-all duration-300 transform ${formFields === 0
+              className={`w-full group relative h-12 rounded-2xl overflow-hidden transition-all duration-300 transform ${formFields === 0
                 ? 'bg-slate-100 border border-slate-200/60 opacity-50 cursor-not-allowed'
                 : loading
                   ? 'opacity-80 cursor-default'
@@ -675,13 +675,13 @@ export const Popup = () => {
 
             <div className="flex flex-col items-center gap-2 mt-2.5">
               {formFields === 0 && (
-                <div className="flex items-center gap-2 text-slate-500 bg-slate-50 px-3 py-2 rounded-none border border-slate-100/50 text-center text-[10px] font-semibold max-w-[320px] leading-normal animate-in fade-in">
+                <div className="flex items-center gap-2 text-slate-500 bg-slate-50 px-3 py-2 rounded-2xl border border-slate-100/50 text-center text-[10px] font-semibold max-w-[320px] leading-normal animate-in fade-in">
                   <AlertCircle className="w-3.5 h-3.5 shrink-0 text-slate-400" />
                   <span>Navigate to a page containing input fields (like a signup or checkout form) to start autofilling.</span>
                 </div>
               )}
               {(limitReached || errorMessage) && formFields > 0 && (
-                <div className="flex items-center gap-2 text-rose-700 bg-rose-50/80 px-3 py-2 rounded-none border border-rose-100 text-center text-[10px] font-bold max-w-[320px] leading-normal shadow-sm">
+                <div className="flex items-center gap-2 text-rose-700 bg-rose-50/80 px-3 py-2 rounded-2xl border border-rose-100 text-center text-[10px] font-bold max-w-[320px] leading-normal shadow-sm">
                   <AlertCircle className="w-3.5 h-3.5 text-rose-500 shrink-0" />
                   <span className="text-left">{getFriendlyErrorMessage(errorMessage || limitErrorMessage) || 'Usage limit reached. Click above to sign in or upgrade.'}</span>
                 </div>
@@ -704,7 +704,7 @@ export const Popup = () => {
                       }
                     });
                   }}
-                  className="text-[10px] font-black text-slate-400 hover:text-indigo-600 uppercase tracking-widest transition-all p-1.5 bg-slate-100/50 rounded-none cursor-pointer animate-in fade-in"
+                  className="text-[10px] font-black text-slate-400 hover:text-indigo-600 uppercase tracking-widest transition-all p-1.5 bg-slate-100/50 rounded-xl cursor-pointer animate-in fade-in"
                 >
                   Force Re-Scan Page
                 </button>
