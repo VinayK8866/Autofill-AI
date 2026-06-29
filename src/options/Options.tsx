@@ -447,6 +447,35 @@ export const Options = () => {
   ]);
 
   const testConnection = (providerId: string, apiKey: string, customUrl?: string) => {
+    if (providerId === 'gemini' || providerId === 'openai' || providerId === 'anthropic') {
+      let hostPattern = '';
+      if (providerId === 'openai') hostPattern = 'https://api.openai.com/*';
+      if (providerId === 'gemini') hostPattern = 'https://generativelanguage.googleapis.com/*';
+      if (providerId === 'anthropic') hostPattern = 'https://api.anthropic.com/*';
+
+      chrome.permissions.contains({
+        origins: [hostPattern]
+      }, (hasPermission) => {
+        if (hasPermission) {
+          executeTestConnection(providerId, apiKey, customUrl);
+        } else {
+          chrome.permissions.request({
+            origins: [hostPattern]
+          }, (granted) => {
+            if (granted) {
+              executeTestConnection(providerId, apiKey, customUrl);
+            } else {
+              triggerToast(`Permission denied for ${providerId} API host.`, 'error');
+            }
+          });
+        }
+      });
+    } else {
+      executeTestConnection(providerId, apiKey, customUrl);
+    }
+  };
+
+  const executeTestConnection = (providerId: string, apiKey: string, customUrl?: string) => {
     setTestLoading(prev => ({ ...prev, [providerId]: true }));
     setTestResults(prev => ({ ...prev, [providerId]: null }));
 
