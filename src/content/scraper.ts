@@ -21,11 +21,18 @@ export class FormScraper {
     root: Document | ShadowRoot | Element = document
   ): HTMLElement[] {
     const elements: HTMLElement[] = [];
-    
-    // Query all immediate children
-    const allNodes = root.querySelectorAll('*');
-    allNodes.forEach((node) => {
-      const el = node as HTMLElement;
+    const doc = root.ownerDocument || (root as Document) || document;
+    if (!doc) return elements;
+
+    const walker = doc.createTreeWalker(
+      root,
+      NodeFilter.SHOW_ELEMENT,
+      null
+    );
+
+    let currentNode = walker.nextNode();
+    while (currentNode) {
+      const el = currentNode as HTMLElement;
       
       // If it matches form tags or standard editable roles
       if (
@@ -41,7 +48,9 @@ export class FormScraper {
       if (el.shadowRoot) {
         elements.push(...this.findElementsRecursively(el.shadowRoot));
       }
-    });
+      
+      currentNode = walker.nextNode();
+    }
 
     return elements;
   }

@@ -1,4 +1,5 @@
-import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from "@google/generative-ai";
+import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold, SchemaType } from "@google/generative-ai";
+import type { Schema } from "@google/generative-ai";
 import type { FormField } from "../content/scraper";
 
 console.log('✨ AutoFill AI Background Service Worker Initializing...');
@@ -173,7 +174,7 @@ async function handleGenerateData(fields: FormField[], persona: string, customPr
       const prompt = getPromptForPersona(persona, customPrompt, chunk, settings, personaContext);
       const shouldIncrement = (index === 0);
       
-      const rawResult = await generateAICompletion(prompt, settings, shouldIncrement);
+      const rawResult = await generateAICompletion(prompt, settings, shouldIncrement, chunk);
       console.log(`Raw LLM output received for chunk ${index + 1}/${fieldChunks.length}:`, rawResult);
 
       const jsonMatch = rawResult.match(/\{[\s\S]*\}/);
@@ -353,7 +354,7 @@ CRITICAL RULES FOR PROFILE FILLING:
   return instructions;
 }
 
-async function generateAICompletion(prompt: string, settings: Record<string, string | number | boolean | undefined>, incrementUsage?: boolean) {
+async function generateAICompletion(prompt: string, settings: Record<string, string | number | boolean | undefined>, incrementUsage?: boolean, fields?: FormField[]) {
   const provider = settings.aiProvider || 'cloud';
   
   if (provider === 'local') {
@@ -376,7 +377,30 @@ async function generateAICompletion(prompt: string, settings: Record<string, str
     if (!settings.geminiApiKey) throw new Error("Google Gemini API Key is missing. Add it in Options.");
     const genAI = new GoogleGenerativeAI(settings.geminiApiKey as string);
     const models = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.1-pro-preview", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.5-flash-lite"];
-    let lastError: any = null;
+    let lastError: unknown = null;
+
+    let responseSchema: Schema | undefined = undefined;
+    if (fields && fields.length > 0) {
+      const properties: Record<string, Schema> = {};
+      const required: string[] = [];
+      fields.forEach(field => {
+        if (field && typeof field.id === 'string') {
+          const isBool = field.type === 'checkbox' || field.type === 'radio';
+          properties[field.id] = {
+            type: isBool ? SchemaType.BOOLEAN : SchemaType.STRING,
+            description: `Generated mock data for field '${field.id}' (label: ${field.label || ''}, placeholder: ${field.placeholder || ''})`
+          } as Schema;
+          required.push(field.id);
+        }
+      });
+      if (required.length > 0) {
+        responseSchema = {
+          type: SchemaType.OBJECT,
+          properties: properties,
+          required: required
+        };
+      }
+    }
 
     for (const modelName of models) {
       try {
@@ -390,13 +414,14 @@ async function generateAICompletion(prompt: string, settings: Record<string, str
             { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE }
           ],
           generationConfig: {
-            responseMimeType: "application/json"
+            responseMimeType: "application/json",
+            ...(responseSchema ? { responseSchema } : {})
           }
         }, { timeout: 25000 }); // 25-second timeout for large forms
 
         const result = await model.generateContent(prompt);
         return result.response.text();
-      } catch (err: any) {
+      } catch (err) {
         console.warn(`[AutoFill AI] Direct model ${modelName} failed:`, err);
         lastError = err;
       }
@@ -406,6 +431,38 @@ async function generateAICompletion(prompt: string, settings: Record<string, str
 
   if (provider === 'openai') {
     if (!settings.openaiApiKey) throw new Error("OpenAI API Key is missing. Add it in Options.");
+
+    let openAiResponseFormat: Record<string, unknown> = { type: "json_object" };
+    if (fields && fields.length > 0) {
+      const properties: Record<string, { type: string; description: string }> = {};
+      const required: string[] = [];
+      fields.forEach(field => {
+        if (field && typeof field.id === 'string') {
+          const isBool = field.type === 'checkbox' || field.type === 'radio';
+          properties[field.id] = {
+            type: isBool ? "boolean" : "string",
+            description: `Generated value for field '${field.id}' (label: ${field.label || ''})`
+          };
+          required.push(field.id);
+        }
+      });
+      if (required.length > 0) {
+        openAiResponseFormat = {
+          type: "json_schema",
+          json_schema: {
+            name: "form_fill",
+            strict: true,
+            schema: {
+              type: "object",
+              properties: properties,
+              required: required,
+              additionalProperties: false
+            }
+          }
+        };
+      }
+    }
+
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -416,7 +473,7 @@ async function generateAICompletion(prompt: string, settings: Record<string, str
         model: 'gpt-4o-mini',
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.7,
-        response_format: { type: "json_object" }
+        response_format: openAiResponseFormat
       })
     });
     if (!response.ok) {
@@ -464,10 +521,17 @@ async function generateAICompletion(prompt: string, settings: Record<string, str
 
   let response: Response;
   try {
+    const schemaFields = fields ? fields.map(f => ({
+      id: f.id,
+      type: f.type,
+      label: f.label || '',
+      placeholder: f.placeholder || ''
+    })) : [];
+
     response = await fetch(cloudUrl, {
       method: 'POST',
       headers: headers,
-      body: JSON.stringify({ prompt, incrementUsage })
+      body: JSON.stringify({ prompt, incrementUsage, schemaFields })
     });
   } catch (fetchErr: unknown) {
     const msg = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
@@ -503,7 +567,7 @@ async function generateAICompletion(prompt: string, settings: Record<string, str
   return data.text;
 }
 
-function parseRobustJSON(str: string, keys?: string[]): any {
+function parseRobustJSON(str: string, keys?: string[]): Record<string, unknown> {
   // First attempt: standard JSON.parse
   try {
     return JSON.parse(str);
@@ -532,7 +596,7 @@ function parseRobustJSON(str: string, keys?: string[]): any {
     }
     
     // Fix trailing commas
-    cleaned = cleaned.replace(/,\s*([\}\]])/g, '$1');
+    cleaned = cleaned.replace(/,\s*([}\]])/g, '$1');
 
     // Escape internal quotes
     let result = "";
@@ -608,7 +672,7 @@ function parseFlatJSONWithKnownKeys(str: string, keys: string[]): Record<string,
   const keyPositions: { key: string; index: number; valueStart: number }[] = [];
   
   for (const key of keys) {
-    const escapedKey = key.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+    const escapedKey = key.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
     // Support matching double or single quotes around keys
     const regex = new RegExp(`['"]${escapedKey}['"]\\s*:`, 'g');
     let match;

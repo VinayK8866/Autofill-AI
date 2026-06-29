@@ -61,16 +61,13 @@ export const Popup = () => {
       const usage = result.usageCount as number || 0;
       const plan = result.userPlan as string || 'Free Tier';
       const token = result.authToken as string || '';
+      const currentProvider = result.aiProvider as string || 'cloud';
 
-      // Limit check logic (Monthly limit for auth free tier, Daily limit for anonymous)
-      if (!token) {
-        if (usage >= 10) {
-          setLimitReached(true);
-          setLimitErrorMessage('Daily anonymous limit reached (10/10). Sign in inside Settings!');
-        } else {
-          setLimitReached(false);
-        }
-      } else if (plan === 'Free Tier' && usage >= 50) {
+      // Limit check logic (Monthly limit for auth free tier, Block cloud anonymous)
+      if (currentProvider === 'cloud' && !token) {
+        setLimitReached(true);
+        setLimitErrorMessage('Authentication Required. Sign in inside Settings to use Autofill AI!');
+      } else if (plan === 'Free Tier' && usage >= 50 && currentProvider === 'cloud') {
         setLimitReached(true);
         setLimitErrorMessage('Monthly fill limit reached (50/50). Upgrade to Pro inside Settings!');
       } else {
@@ -107,15 +104,11 @@ export const Popup = () => {
               const currentPlan = data.userPlan || plan;
               setUsageCount(currentUsage);
               chrome.storage.local.set({ usageCount: currentUsage });
-              
-              if (!token) {
-                if (currentUsage >= 10) {
-                  setLimitReached(true);
-                  setLimitErrorMessage('Daily anonymous limit reached (10/10). Sign in inside Settings!');
-                } else {
-                  setLimitReached(false);
-                }
-              } else if (currentPlan === 'Free Tier' && currentUsage >= 50) {
+
+              if (currentProvider === 'cloud' && !token) {
+                setLimitReached(true);
+                setLimitErrorMessage('Authentication Required. Sign in inside Settings to use Autofill AI!');
+              } else if (currentPlan === 'Free Tier' && currentUsage >= 50 && currentProvider === 'cloud') {
                 setLimitReached(true);
                 setLimitErrorMessage('Monthly fill limit reached (50/50). Upgrade to Pro inside Settings!');
               } else {
@@ -131,23 +124,21 @@ export const Popup = () => {
 
     // Listen for storage changes in real-time (to update count after fills)
     const handleStorageChange = (changes: Record<string, chrome.storage.StorageChange>) => {
-      chrome.storage.local.get(['usageCount', 'userPlan', 'authToken'], (res) => {
+      chrome.storage.local.get(['usageCount', 'userPlan', 'authToken', 'aiProvider'], (res) => {
         const currentUsage = res.usageCount as number || 0;
         const currentPlan = res.userPlan as string || 'Free Tier';
         const currentToken = res.authToken as string || '';
-        
+        const currentProvider = res.aiProvider as string || 'cloud';
+
         setUsageCount(currentUsage);
         setUserPlan(currentPlan);
         setAuthToken(currentToken);
+        setAiProvider(currentProvider);
 
-        if (!currentToken) {
-          if (currentUsage >= 10) {
-            setLimitReached(true);
-            setLimitErrorMessage('Daily anonymous limit reached (10/10). Sign in inside Settings!');
-          } else {
-            setLimitReached(false);
-          }
-        } else if (currentPlan === 'Free Tier' && currentUsage >= 50) {
+        if (currentProvider === 'cloud' && !currentToken) {
+          setLimitReached(true);
+          setLimitErrorMessage('Authentication Required. Sign in inside Settings to use Autofill AI!');
+        } else if (currentPlan === 'Free Tier' && currentUsage >= 50 && currentProvider === 'cloud') {
           setLimitReached(true);
           setLimitErrorMessage('Monthly fill limit reached (50/50). Upgrade to Pro inside Settings!');
         } else {
@@ -381,15 +372,15 @@ export const Popup = () => {
         };
       }
       return {
-        label: 'Basic Cloud AI',
+        label: 'Basic Autofill AI',
         icon: <Globe className="w-3.5 h-3.5" />,
         desc: `${userEmail} (${Math.max(0, 50 - usageCount)}/50 fills left)`
       };
     }
     return {
-      label: 'Free Cloud Generator',
+      label: 'Autofill AI (Authentication Required)',
       icon: <Globe className="w-3.5 h-3.5" />,
-      desc: `${Math.max(0, 10 - usageCount)} free fills left today`
+      desc: 'Log in inside settings to unlock 50 free fills'
     };
   };
 
@@ -400,7 +391,10 @@ export const Popup = () => {
     if (formFields === 0) return "No Forms Detected";
     if (loading) return "Magically Filling...";
     if (limitReached) {
-      return !authToken 
+      if (aiProvider === 'cloud' && !authToken) {
+        return "Sign In to use Autofill AI";
+      }
+      return !authToken
         ? "Limit Reached: Sign Up for 50 Free Fills!"
         : "Limit Reached: Upgrade to Pro";
     }

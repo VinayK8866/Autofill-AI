@@ -62,7 +62,7 @@ export const Options = () => {
   // Advanced Tab states
   const [loadingSettings, setLoadingSettings] = useState(true);
   const [localAiStatus, setLocalAiStatus] = useState<'checking' | 'available' | 'unavailable'>('checking');
-  
+
   // API Key Visibility States
   const [showGeminiKey, setShowGeminiKey] = useState(false);
   const [showOpenaiKey, setShowOpenaiKey] = useState(false);
@@ -153,7 +153,7 @@ export const Options = () => {
                 const metaLastName = parts.slice(1).join(' ') || '';
                 const metaEmail = user.email || '';
 
-                const updateObj: Record<string, any> = {
+                const updateObj: Record<string, string | number | boolean | undefined> = {
                   authToken: accessToken,
                   userEmail: user.email,
                   userPlan: plan,
@@ -190,7 +190,7 @@ export const Options = () => {
                   setUserAvatar(avatar);
                   setIsLoggedIn(true);
                   setAuthLoading(false);
-                  
+
                   // PostHog Telemetry Identification
                   posthog.identify(user.id);
                   posthog.people.set({
@@ -394,13 +394,16 @@ export const Options = () => {
   useEffect(() => {
     const checkLocalAI = async () => {
       try {
-        const winAi = typeof window !== 'undefined' ? (window as any).ai : undefined;
-        const ai = (self as any).ai || (chrome as any).aiOriginTrial || winAi;
-        if (ai && ai.languageModel) {
-          const caps = await ai.languageModel.capabilities();
-          if (caps && caps.available !== 'no') {
-            setLocalAiStatus('available');
-            return;
+        const winAi = typeof window !== 'undefined' ? (window as unknown as Record<string, unknown>).ai as Record<string, unknown> | undefined : undefined;
+        const ai = (((self as unknown as Record<string, unknown>).ai || (chrome as unknown as Record<string, unknown>).aiOriginTrial || winAi)) as Record<string, unknown> | undefined;
+        if (ai && typeof ai === 'object' && ai.languageModel && typeof ai.languageModel === 'object') {
+          const lm = ai.languageModel as Record<string, unknown>;
+          if (typeof lm.capabilities === 'function') {
+            const caps = await (lm.capabilities as () => Promise<{ available: string }>)();
+            if (caps && caps.available !== 'no') {
+              setLocalAiStatus('available');
+              return;
+            }
           }
         }
         setLocalAiStatus('unavailable');
@@ -1037,24 +1040,18 @@ export const Options = () => {
                 <div className="space-y-6 animate-in fade-in duration-300">
                   {/* Promo/Warning Banner for anonymous users */}
                   {!isLoggedIn && (
-                    <div className={`p-6 rounded-2xl border ${usageCount >= 10
-                      ? 'bg-gradient-to-r from-rose-500/15 via-orange-500/10 to-transparent border-rose-200 text-rose-950 shadow-inner'
-                      : 'bg-gradient-to-r from-indigo-500/15 via-purple-500/10 to-transparent border-indigo-200 text-indigo-950 shadow-inner'
-                      } space-y-3 relative overflow-hidden mb-2`}>
-                      <div className="absolute -right-8 -top-8 w-24 h-24 bg-indigo-500/10 rounded-full blur-2xl" />
+                    <div className="p-6 rounded-2xl border bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-transparent border-amber-200 text-amber-950 shadow-inner space-y-3 relative overflow-hidden mb-2">
+                      <div className="absolute -right-8 -top-8 w-24 h-24 bg-amber-500/10 rounded-full blur-2xl" />
                       <div className="flex items-start gap-4">
-                        <div className={`p-2.5 rounded-xl ${usageCount >= 10 ? 'bg-rose-500 text-white animate-pulse' : 'bg-indigo-600 text-white'
-                          } shrink-0 shadow-md`}>
+                        <div className="p-2.5 rounded-xl bg-amber-600 text-white shrink-0 shadow-md">
                           <Sparkles className="w-5 h-5" />
                         </div>
                         <div className="space-y-1">
                           <h4 className="text-sm font-black tracking-tight uppercase leading-snug">
-                            {usageCount >= 10 ? 'Daily Limit Reached (10/10 Fills)!' : 'Unlock 50 Free Monthly Fills!'}
+                            Autofill AI requires Authentication
                           </h4>
                           <p className="text-xs font-semibold leading-relaxed text-slate-600">
-                            {usageCount >= 10
-                              ? 'You have completed your daily anonymous limit. Register a free account to instantly unlock 50 fast cloud fills every month!'
-                              : 'Anonymous users get 10 free daily fills. Create a free cloud account to get 50 high-speed fills every month, profile backup, and extra premium features.'}
+                            To prevent API abuse and control server costs, unauthenticated requests to the Autofill AI are disabled. Sign in or register a free account to instantly unlock 50 fast cloud fills every month, or use Local AI / Private API keys for unlimited free fills.
                           </p>
                           <div className="text-[11px] font-bold text-indigo-600 mt-2.5">
                             💡 Tech-savvy? Avoid cloud registration entirely by entering your own private API key in the{' '}
@@ -1426,11 +1423,10 @@ export const Options = () => {
                             }`}
                         >
                           <div className="flex items-center gap-2 mb-1">
-                            <div className={`p-1.5 rounded-lg transition-colors ${
-                              provider === p.id 
-                                ? 'bg-white/20 text-white' 
-                                : 'bg-slate-100 text-indigo-500 group-hover:bg-indigo-50 group-hover:text-indigo-600'
-                            }`}>
+                            <div className={`p-1.5 rounded-lg transition-colors ${provider === p.id
+                              ? 'bg-white/20 text-white'
+                              : 'bg-slate-100 text-indigo-500 group-hover:bg-indigo-50 group-hover:text-indigo-600'
+                              }`}>
                               {p.icon}
                             </div>
                             <span className="text-sm font-bold">{p.label}</span>
@@ -1447,15 +1443,15 @@ export const Options = () => {
                         <span className="text-xs font-bold uppercase tracking-wider">
                           About {
                             provider === 'cloud' ? 'Express Mode' :
-                            provider === 'local' ? 'Local Nano AI' :
-                            provider === 'gemini' ? 'Google Gemini' :
-                            provider === 'openai' ? 'OpenAI GPT-4o-mini' :
-                            provider === 'anthropic' ? 'Anthropic Claude AI' : 'Active Provider'
+                              provider === 'local' ? 'Local Nano AI' :
+                                provider === 'gemini' ? 'Google Gemini' :
+                                  provider === 'openai' ? 'OpenAI GPT-4o-mini' :
+                                    provider === 'anthropic' ? 'Anthropic Claude AI' : 'Active Provider'
                           }
                         </span>
                       </div>
                       <p className="text-xs text-slate-600 font-medium leading-relaxed">
-                        {provider === 'cloud' && "Uses our optimized hosted Cloud API (Gemini 1.5 Flash). Free accounts get 50 monthly fills. Upgrade to Pro for unlimited fills. All data is encrypted during transit and handled anonymously."}
+                        {provider === 'cloud' && "Uses our optimized hosted Cloud API (Gemini 1.5 Flash). Requires a signed-in account. Free accounts get 50 monthly fills. Upgrade to Pro for unlimited fills. Unauthenticated calls are disabled to prevent server abuse."}
                         {provider === 'local' && "Runs 100% locally and privately inside your browser using Chrome's built-in Gemini Nano. Entirely free and offline. Requires Chrome Dev/Canary (v127+) with optimization guide flags enabled."}
                         {provider === 'gemini' && "Connects directly to Google's generative models using your private API key. Highly customizable, extremely fast, and billed directly by Google per token."}
                         {provider === 'openai' && "Connects directly to OpenAI's completion servers using your private API key. Highly reliable formatting using GPT-4o-mini, billed directly by OpenAI."}
@@ -1678,15 +1674,13 @@ export const Options = () => {
                       <button
                         type="button"
                         onClick={() => setEnableFloatingDock(!enableFloatingDock)}
-                        className={`w-10 h-6 rounded-full p-1 transition-colors duration-200 focus:outline-none cursor-pointer flex items-center ${
-                          enableFloatingDock ? 'bg-indigo-600' : 'bg-slate-300'
-                        }`}
+                        className={`w-10 h-6 rounded-full p-1 transition-colors duration-200 focus:outline-none cursor-pointer flex items-center ${enableFloatingDock ? 'bg-indigo-600' : 'bg-slate-300'
+                          }`}
                         aria-label="Toggle In-Page Shortcut Dock"
                       >
                         <div
-                          className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-200 ${
-                            enableFloatingDock ? 'translate-x-4' : 'translate-x-0'
-                          }`}
+                          className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-200 ${enableFloatingDock ? 'translate-x-4' : 'translate-x-0'
+                            }`}
                         />
                       </button>
                     </div>

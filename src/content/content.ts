@@ -4,7 +4,7 @@ import contentCss from './content.css?inline';
 function isContextValid(): boolean {
   try {
     return typeof chrome !== 'undefined' && !!chrome.runtime && !!chrome.runtime.id;
-  } catch (e) {
+  } catch {
     return false;
   }
 }
@@ -97,14 +97,14 @@ class MagicCommandDock {
       let shouldUpdate = false;
       for (const mutation of mutations) {
         if (mutation.addedNodes.length > 0 || mutation.removedNodes.length > 0) {
-          const elementsModified = Array.from(mutation.addedNodes).some(node => 
+          const elementsModified = Array.from(mutation.addedNodes).some(node =>
             node instanceof HTMLElement && (
-              node.matches('input, textarea, select') || 
+              node.matches('input, textarea, select') ||
               node.querySelector('input, textarea, select')
             )
-          ) || Array.from(mutation.removedNodes).some(node => 
+          ) || Array.from(mutation.removedNodes).some(node =>
             node instanceof HTMLElement && (
-              node.matches('input, textarea, select') || 
+              node.matches('input, textarea, select') ||
               node.querySelector('input, textarea, select')
             )
           );
@@ -164,7 +164,7 @@ class MagicCommandDock {
       }
       return `Fills: ${Math.max(0, 50 - this.usageCount)}/50 left`;
     }
-    return `Fills: ${Math.max(0, 10 - this.usageCount)}/10 left`;
+    return 'Autofill AI: Auth Required';
   }
 
   private updateDockState() {
@@ -176,7 +176,7 @@ class MagicCommandDock {
     if (this.isLoading) return; // Prevent rebuilding during active filling
 
     const activeFields = FormScraper.scrapeForms().length;
-    
+
     const host = document.getElementById('autofill-ai-shadow-host');
     // Completely hide the floating dock if there are no forms to fill on the page
     if (activeFields === 0) {
@@ -210,9 +210,9 @@ class MagicCommandDock {
         this.updateDockState();
       });
     } else {
-      const isLimitReached = !this.authToken 
-        ? this.usageCount >= 10 
-        : (this.userPlan === 'Free Tier' && this.usageCount >= 50);
+      const isLimitReached = this.aiProvider === 'cloud' && (
+        !this.authToken || (this.userPlan === 'Free Tier' && this.usageCount >= 50)
+      );
 
       let btnText = 'Magically Fill Form';
       let btnClass = 'af-btn-primary';
@@ -225,8 +225,8 @@ class MagicCommandDock {
 
       if (isLimitReached) {
         btnClass += ' limit-reached';
-        btnText = !this.authToken 
-          ? 'Limit Reached: Sign Up for 50 Free Fills!' 
+        btnText = (this.aiProvider === 'cloud' && !this.authToken)
+          ? 'Sign In to use Autofill AI'
           : 'Limit Reached: Upgrade to Pro';
         btnIcon = `
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -285,7 +285,7 @@ class MagicCommandDock {
                 class="af-custom-prompt-input" 
                 placeholder="e.g. A developer from Seattle named Jane who loves coding..."
                 rows="2"
-              >${this.customPrompts[this.currentPersona] || ''}</textarea>
+              ></textarea>
             </div>
           </div>
 
@@ -333,7 +333,7 @@ class MagicCommandDock {
           const target = e.currentTarget as HTMLButtonElement;
           const persona = target.getAttribute('data-persona') || 'default';
           this.currentPersona = persona;
-          
+
           // Force repaint to dynamically update active selection, button class, text, and icons
           this.lastMinimizedState = null;
           this.lastFieldsCount = null;
@@ -356,10 +356,13 @@ class MagicCommandDock {
 
       // Bind Prompt input changes
       const textarea = this.dockContainer.querySelector('.af-custom-prompt-input') as HTMLTextAreaElement;
-      textarea?.addEventListener('input', (e) => {
-        const val = (e.target as HTMLTextAreaElement).value;
-        this.customPrompts[this.currentPersona] = val;
-      });
+      if (textarea) {
+        textarea.value = this.customPrompts[this.currentPersona] || '';
+        textarea.addEventListener('input', (e) => {
+          const val = (e.target as HTMLTextAreaElement).value;
+          this.customPrompts[this.currentPersona] = val;
+        });
+      }
 
       // Fill Button
       const fillBtn = this.dockContainer.querySelector('#af-fill-btn') as HTMLButtonElement;
@@ -389,7 +392,7 @@ class MagicCommandDock {
         e.preventDefault();
         this.handleFill();
       }
-      
+
       // Alt + P to Toggle Dock Minimize
       if (e.altKey && e.key.toLowerCase() === 'p') {
         e.preventDefault();
@@ -405,7 +408,7 @@ class MagicCommandDock {
         sendResponse({ status: 'alive' });
         return true;
       }
-      
+
       if (request.action === 'trigger_fill') {
         const fields = FormScraper.scrapeForms();
         if (fields.length === 0) {
@@ -441,7 +444,7 @@ class MagicCommandDock {
     // Listen for storage changes dynamically (e.g. toggling floating dock from the extension popup)
     chrome.storage.onChanged.addListener((changes) => {
       if (!isContextValid()) return;
-      
+
       let needsUpdate = false;
 
       if (changes.profileFirstName || changes.profileLastName || changes.profileEmail) {
@@ -465,9 +468,9 @@ class MagicCommandDock {
             this.createDock();
             this.setupObserver();
             chrome.storage.local.get([
-              'isMinimized', 
-              'profileFirstName', 
-              'profileLastName', 
+              'isMinimized',
+              'profileFirstName',
+              'profileLastName',
               'profileEmail',
               'usageCount',
               'userPlan',
@@ -526,7 +529,7 @@ class MagicCommandDock {
     inputs.forEach((node) => {
       const el = node as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
       if (el.type === 'hidden' || el.type === 'submit' || el.type === 'button') return;
-      
+
       if (el instanceof HTMLInputElement && (el.type === 'checkbox' || el.type === 'radio')) {
         el.checked = false;
       } else {
@@ -535,7 +538,7 @@ class MagicCommandDock {
       el.dispatchEvent(new Event('input', { bubbles: true }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
     });
-    
+
     // Scan dynamic fields
     this.updateDockState();
   }
@@ -556,9 +559,9 @@ class MagicCommandDock {
       if (errorText) errorText.textContent = '';
     }
 
-    const isLimitReached = !this.authToken 
-      ? this.usageCount >= 10 
-      : (this.userPlan === 'Free Tier' && this.usageCount >= 50);
+    const isLimitReached = this.aiProvider === 'cloud' && (
+      !this.authToken || (this.userPlan === 'Free Tier' && this.usageCount >= 50)
+    );
 
     if (isLimitReached) {
       if (fillBtn) {
@@ -612,7 +615,7 @@ class MagicCommandDock {
 
     try {
       console.log(`Sending fields to background AI engine. Persona: ${persona}. Prompt instruction length: ${prompt.length}`);
-      
+
       const response = await new Promise<Record<string, string> | null | undefined>((resolve) => {
         chrome.runtime.sendMessage({
           action: 'generate_data',
@@ -637,7 +640,7 @@ class MagicCommandDock {
         Object.entries(response).forEach(([fieldId, value]) => {
           setTimeout(() => {
             injectValue(fieldId, value as string);
-            
+
             // Add wave pulse styling to show fill activity
             const inputEl = document.getElementById(fieldId) || document.querySelector(`[name="${CSS.escape(fieldId)}"]`);
             if (inputEl) {

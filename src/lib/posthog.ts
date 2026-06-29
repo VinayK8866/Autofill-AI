@@ -1,4 +1,4 @@
-import posthog from 'posthog-js';
+import posthog from 'posthog-js/dist/module.no-external';
 
 const POSTHOG_KEY = (import.meta.env.VITE_POSTHOG_KEY as string) || '';
 const PROXY_HOST = 'https://autofill-ai-proxy.vinaykondabattula.workers.dev/posthog';
@@ -11,6 +11,7 @@ if (POSTHOG_KEY && typeof window !== 'undefined') {
     capture_performance: true,
     persistence: 'localStorage',
     enable_recording_console_log: true,
+    disable_external_dependency_loading: true,
     loaded: () => {
       console.log('PostHog telemetry initialized via Cloudflare proxy');
     }

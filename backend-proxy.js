@@ -191,13 +191,6 @@ export default {
           userPlan = "Free Tier";
           usageCount = 0;
         }
-      } else {
-        userPlan = "Anonymous";
-        if (env.USERS_KV) {
-          usageCount = parseInt(await env.USERS_KV.get(`ip:fills:${userId}`) || "0", 10);
-        } else {
-          usageCount = 0;
-        }
       }
 
       // 4. Handle Usage Info Request
@@ -210,10 +203,11 @@ export default {
         });
       }
 
-      // Extract Prompt and incrementUsage from extension request
+      // Extract Prompt, incrementUsage, and fields schema from extension request
       const requestBody = await request.json();
       const prompt = requestBody.prompt;
       const incrementUsage = requestBody.incrementUsage;
+      const schemaFields = requestBody.schemaFields;
 
       if (prompt === "PING_TEST") {
         return new Response(JSON.stringify({ success: true, message: "pong" }), {
@@ -221,40 +215,60 @@ export default {
         });
       }
 
+      // Block unauthenticated calls to expensive LLM endpoints
+      if (userTier !== "authenticated") {
+        return new Response(JSON.stringify({ error: "Authentication Required. Please log in or sign up inside extension settings to use Autofill AI." }), {
+          status: 401,
+          headers: {
+            "Content-Type": "application/json",
+            ...corsHeaders
+          }
+        });
+      }
+
       // 5. Check Limits before Generation
       if (incrementUsage !== false) {
-        if (userTier === "authenticated") {
-          if (userPlan === "Free Tier" && usageCount >= 50) {
-            return new Response(
-              JSON.stringify({ error: "Monthly fill limit reached (50/50). Upgrade to Pro inside Options!" }),
-              { 
-                status: 402, 
-                headers: { 
-                  "Content-Type": "application/json", 
-                  ...corsHeaders
-                } 
-              }
-            );
-          }
-        } else {
-          if (usageCount >= 10) {
-            return new Response(
-              JSON.stringify({ error: "Daily anonymous limit reached. Sign in for 50 free monthly fills!" }),
-              { 
-                status: 429, 
-                headers: { 
-                  "Content-Type": "application/json", 
-                  ...corsHeaders
-                } 
-              }
-            );
-          }
+        if (userPlan === "Free Tier" && usageCount >= 50) {
+          return new Response(
+            JSON.stringify({ error: "Monthly fill limit reached (50/50). Upgrade to Pro inside Options!" }),
+            { 
+              status: 402, 
+              headers: { 
+                "Content-Type": "application/json", 
+                ...corsHeaders
+              } 
+            }
+          );
         }
       }
 
       const API_KEY = env.GEMINI_API_KEY;
       if (!API_KEY) {
         return new Response("Server configuration error: GEMINI_API_KEY secret is missing in environment variables.", { status: 500 });
+      }
+
+      // Dynamically construct response schema to enforce structured output constraints
+      let responseSchema = null;
+      if (schemaFields && Array.isArray(schemaFields) && schemaFields.length > 0) {
+        const properties = {};
+        const required = [];
+        schemaFields.forEach(field => {
+          if (field && typeof field.id === 'string') {
+            const isBool = field.type === 'checkbox' || field.type === 'radio';
+            properties[field.id] = {
+              type: isBool ? "BOOLEAN" : "STRING",
+              description: `Realistic mock fill data for field '${field.id}' (label: ${field.label || ''}, placeholder: ${field.placeholder || ''})`
+            };
+            required.push(field.id);
+          }
+        });
+        if (required.length > 0) {
+          responseSchema = {
+            type: "OBJECT",
+            properties: properties,
+            required: required
+          };
+        }
       }
 
       const models = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.1-pro-preview", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.5-flash-lite"];
@@ -282,6 +296,7 @@ export default {
               generationConfig: {
                 temperature: 0.1, 
                 response_mime_type: "application/json",
+                ...(responseSchema ? { response_schema: responseSchema } : {})
               }
             }),
             signal: controller.signal
@@ -339,12 +354,8 @@ export default {
       let newUsageCount = usageCount;
       if (incrementUsage !== false) {
         newUsageCount = usageCount + 1;
-        if (env.USERS_KV) {
-          if (userTier === "authenticated") {
-            await env.USERS_KV.put(`user:fills:${userId}`, newUsageCount.toString());
-          } else {
-            await env.USERS_KV.put(`ip:fills:${userId}`, newUsageCount.toString(), { expirationTtl: 86400 });
-          }
+        if (env.USERS_KV && userTier === "authenticated") {
+          await env.USERS_KV.put(`user:fills:${userId}`, newUsageCount.toString());
         }
       }
 

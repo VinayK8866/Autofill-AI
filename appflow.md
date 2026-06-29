@@ -36,11 +36,11 @@ graph TD
     *   Includes a manual "Done & Close Settings" CTA that closes the tab.
 6. Robust phone number formatting validation runs when the phone field loses focus (`onBlur`), warning the user of formatting anomalies without interrupting active typing.
 
-### Phase 2: Lazy Authentication
-1. Account sign-up is completely optional. The extension functions instantly using either:
+### Phase 2: Authentication & AI Providers
+1. The extension functions instantly out-of-the-box using private keys or built-in local AI models:
     *   **Local Nano:** Completely private, offline, and free via Chrome's built-in AI.
-    *   **Anonymous Cloud Tier:** Runs through the proxy worker with a basic daily allowance.
-2. Users only register or log in (via Supabase auth) if they exhaust their daily allowance and want to upgrade to the **Unlimited Pro Cloud Tier**.
+    *   **Private API Keys:** Direct connection from extension to OpenAI/Gemini/Anthropic models using the user's own keys.
+2. Users only register or log in (via Supabase auth) to use our hosted Autofill AI tier. The free authenticated tier includes 50 monthly fills, with an upgrade to the **Unlimited Pro Cloud Tier** to unlock unlimited fills.
 
 ### Phase 3: Form Detection & In-Page Interaction
 1. When visiting any site, the content script ([content.ts](file:///home/user/Private_View/Vinay/DummyDataFiller/src/content/content.ts)) checks for input fields.
