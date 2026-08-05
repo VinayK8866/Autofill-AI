@@ -1,7 +1,8 @@
 import posthog from 'posthog-js/dist/module.no-external';
+import { ENV } from '../config/env';
 
-const POSTHOG_KEY = (import.meta.env.VITE_POSTHOG_KEY as string) || '';
-const PROXY_HOST = 'https://autofill-ai-proxy.vinaykondabattula.workers.dev/posthog';
+const POSTHOG_KEY = ENV.POSTHOG_KEY;
+const PROXY_HOST = `${ENV.CLOUD_PROXY_URL.replace(/\/$/, '')}/posthog`;
 
 if (POSTHOG_KEY && typeof window !== 'undefined') {
   posthog.init(POSTHOG_KEY, {

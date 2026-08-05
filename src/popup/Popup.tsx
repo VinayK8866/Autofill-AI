@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Settings, Sparkles, History, Cpu, Globe, Rocket, AlertCircle, LockKeyhole, User } from 'lucide-react';
 import { posthog } from '@/lib/posthog';
 import { Logo } from '@/components/Logo';
+import { ENV } from '@/config/env';
 
 export const Popup = () => {
   const [loading, setLoading] = useState(false);
@@ -88,7 +89,7 @@ export const Popup = () => {
       }
 
       if (typeof result.authToken === 'string' && result.authToken) {
-        const cloudUrl = 'https://autofill-ai-proxy.vinaykondabattula.workers.dev';
+        const cloudUrl = ENV.CLOUD_PROXY_URL;
         fetch(`${cloudUrl}/usage`, {
           method: 'POST',
           headers: {

@@ -606,7 +606,7 @@ class MagicCommandDock {
         tab.addEventListener('click', (e) => {
           const target = e.currentTarget as HTMLButtonElement;
           const persona = target.getAttribute('data-persona') || 'default';
-          
+
           if ((persona === 'qa' || persona === 'b2b') && this.userPlan !== 'Pro Plan') {
             const errorAlert = this.dockContainer?.querySelector('#af-error-alert') as HTMLDivElement;
             if (errorAlert) {
@@ -618,7 +618,7 @@ class MagicCommandDock {
             }
             return;
           }
-          
+
           this.currentPersona = persona;
 
           // Force repaint to dynamically update active selection, button class, text, and icons
@@ -955,10 +955,26 @@ class MagicCommandDock {
 
             // Add wave pulse styling to show fill activity
             const inputEl = document.querySelector(`[data-autofill-id="${CSS.escape(fieldId)}"]`) ||
-                            document.getElementById(fieldId) || 
-                            document.querySelector(`[name="${CSS.escape(fieldId)}"]`);
+              document.getElementById(fieldId) ||
+              document.querySelector(`[name="${CSS.escape(fieldId)}"]`);
             if (inputEl) {
               inputEl.classList.add('af-filled-pulse');
+
+              // Spawn smooth micro white/purple sparkle over field
+              const rect = inputEl.getBoundingClientRect();
+              if (rect.width > 0 && rect.height > 0) {
+                const sparkle = document.createElement('span');
+                sparkle.className = 'af-sparkle-overlay';
+                sparkle.innerHTML = `<svg width="2" height="2" viewBox="0 0 24 24" fill="#ffffff" style="filter: drop-shadow(0 0 5px #6366f1);"><path d="M12 0L14.59 9.41L24 12L14.59 14.59L12 24L9.41 14.59L0 12L9.41 9.41L12 0Z"/></svg>`;
+                sparkle.style.top = `${window.scrollY + rect.top + (rect.height / 2) - 8}px`;
+                sparkle.style.left = `${window.scrollX + rect.right - 22}px`;
+                document.body.appendChild(sparkle);
+
+                setTimeout(() => {
+                  sparkle.remove();
+                }, 1200);
+              }
+
               setTimeout(() => {
                 inputEl.classList.remove('af-filled-pulse');
               }, 1500);

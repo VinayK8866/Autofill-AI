@@ -1,26 +1,37 @@
 /**
  * AutoFill AI Cloud Proxy with Supabase JWT Auth & KV Usage Tracking
  * 
- * Instructions:
- * 1. Go to dash.cloudflare.com
- * 2. Create a "Worker"
- * 3. Paste this code into the worker editor
- * 4. Go to "Settings -> Variables"
- * 5. Add 'GEMINI_API_KEY' as a secret (your Google AI Studio key)
- * 6. Add 'SUPABASE_JWT_SECRET' as a secret (from Supabase Settings -> API)
- * 7. Bind a KV Namespace named 'USERS_KV' to store rate limits (optional in dev)
+ * Modular worker architecture:
+ * - Rate Limiter: ./src/proxy/rateLimiter.js
+ * - JWT Verification: ./src/proxy/auth.js
+ * - Supabase Integration: ./src/proxy/supabase.js
+ * - Webhooks: ./src/proxy/webhooks.js
  */
+
+import { checkRateLimit } from './src/proxy/rateLimiter.js';
+import { verifyJWT } from './src/proxy/auth.js';
+import { getSupabaseProfile, incrementSupabaseUsage, updateSupabaseProfilePlan } from './src/proxy/supabase.js';
+import { verifyLemonSqueezySignature } from './src/proxy/webhooks.js';
 
 export default {
   async fetch(request, env, ctx) {
+    // 1MB Payload Size Limit Guard
+    const contentLength = parseInt(request.headers.get("Content-Length") || "0", 10);
+    if (contentLength > 1024 * 1024) {
+      return new Response(JSON.stringify({ error: "Payload Too Large. Maximum allowed size is 1MB." }), {
+        status: 413,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
     const origin = request.headers.get("Origin") || "";
     
     // Support single or comma-separated list of allowed extension origins to allow dev and prod side-by-side
     const allowedExtensionIds = env.ALLOWED_EXTENSION_ID 
       ? env.ALLOWED_EXTENSION_ID.split(",").map(id => id.trim())
-      : ["chrome-extension://your_extension_id_here"];
+      : [];
 
-    const isAllowed = allowedExtensionIds.includes(origin) || origin.endsWith("vinaykondabattula.workers.dev");
+    const isAllowed = allowedExtensionIds.includes(origin) || (origin && origin.endsWith("vinaykondabattula.workers.dev"));
     const allowedOrigin = isAllowed ? origin : "null";
 
     const url = new URL(request.url);
@@ -42,11 +53,24 @@ export default {
         });
       }
 
+      // Rate limiting check for analytics proxy (120 requests/minute per client IP)
+      const clientIP = request.headers.get("CF-Connecting-IP") || "anon_ip";
+      const phRateLimit = await checkRateLimit(env, `posthog:${clientIP}`, 120, 60);
+      if (!phRateLimit.allowed) {
+        return new Response(JSON.stringify({ error: "Rate limit exceeded for analytics proxy." }), {
+          status: 429,
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": allowedOrigin,
+            "Retry-After": phRateLimit.reset.toString()
+          }
+        });
+      }
+
       const headers = new Headers(request.headers);
       headers.set("Host", "us.i.posthog.com");
       
-      const clientIP = request.headers.get("CF-Connecting-IP");
-      if (clientIP) {
+      if (clientIP && clientIP !== "anon_ip") {
         headers.set("X-Forwarded-For", clientIP);
         headers.set("X-Real-IP", clientIP);
       }
@@ -84,6 +108,10 @@ export default {
       "Access-Control-Allow-Origin": allowedOrigin,
       "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      "X-Content-Type-Options": "nosniff",
+      "X-Frame-Options": "DENY",
+      "X-XSS-Protection": "1; mode=block",
+      "Referrer-Policy": "strict-origin-when-cross-origin"
     };
 
     // 1. Handle CORS & Preflight Options
@@ -99,12 +127,27 @@ export default {
       return new Response("Method Not Allowed", { status: 405 });
     }
 
-    // Handle dynamic client configuration request (unauthenticated)
+    // Handle dynamic client configuration request (unauthenticated, rate limited to 60 req/min per IP)
     if (isConfigRequest) {
-      const checkoutUrl = env.LEMON_SQUEEZY_CHECKOUT_URL || "https://autofill-ai.lemonsqueezy.com/buy/mock-variant-id";
+      const clientIP = request.headers.get("CF-Connecting-IP") || "anon_ip";
+      const cfgRateLimit = await checkRateLimit(env, `config:${clientIP}`, 60, 60);
+      if (!cfgRateLimit.allowed) {
+        return new Response(JSON.stringify({ error: "Too many configuration requests." }), {
+          status: 429,
+          headers: {
+            "Content-Type": "application/json",
+            "Retry-After": cfgRateLimit.reset.toString(),
+            ...corsHeaders
+          }
+        });
+      }
+
+      const checkoutUrl = env.LEMON_SQUEEZY_CHECKOUT_URL || "";
       return new Response(JSON.stringify({ checkoutUrl }), {
         headers: {
           "Content-Type": "application/json",
+          "X-RateLimit-Limit": cfgRateLimit.limit.toString(),
+          "X-RateLimit-Remaining": cfgRateLimit.remaining.toString(),
           ...corsHeaders
         }
       });
@@ -114,8 +157,19 @@ export default {
     const isWebhookRequest = url.pathname === "/webhook/lemonsqueezy";
 
     try {
-      // Handle Lemon Squeezy Webhooks first
+      // Handle Lemon Squeezy Webhooks first (rate limited to 30 req/min per IP)
       if (isWebhookRequest) {
+        const clientIP = request.headers.get("CF-Connecting-IP") || "anon_ip";
+        const whRateLimit = await checkRateLimit(env, `webhook:${clientIP}`, 30, 60);
+        if (!whRateLimit.allowed) {
+          return new Response("Too Many Webhook Requests", {
+            status: 429,
+            headers: {
+              "Retry-After": whRateLimit.reset.toString(),
+              ...corsHeaders
+            }
+          });
+        }
         const signatureHeader = request.headers.get("X-Signature");
         const bodyText = await request.text();
         const secret = env.LEMON_SQUEEZY_WEBHOOK_SECRET;
@@ -133,8 +187,23 @@ export default {
 
         const payload = JSON.parse(bodyText);
         const eventName = payload.meta ? payload.meta.event_name : null;
+        const eventId = payload.meta && payload.meta.webhook_id ? payload.meta.webhook_id : (payload.data ? payload.data.id : null);
         const customData = payload.meta ? payload.meta.custom_data : null;
         const userId = customData ? (customData.user_id || customData.userId) : null;
+
+        // Webhook Idempotency Guard: prevent duplicate webhook replay processing
+        if (eventId && env.USERS_KV) {
+          const processedKey = `webhook:processed:${eventId}`;
+          const alreadyProcessed = await env.USERS_KV.get(processedKey);
+          if (alreadyProcessed) {
+            console.log(`Webhook event ${eventId} already processed. Skipping duplicate payload.`);
+            return new Response(JSON.stringify({ received: true, status: "already_processed" }), {
+              headers: { "Content-Type": "application/json", ...corsHeaders }
+            });
+          }
+          // Mark event as processed with 7-day TTL
+          await env.USERS_KV.put(processedKey, "1", { expirationTtl: 7 * 86400 });
+        }
 
         if (userId) {
           let updatedPlan = "Free Tier";
@@ -227,29 +296,67 @@ export default {
         }
       }
 
-      // 4. Handle Usage Info Request
+      // 4. Handle Usage Info Request (Rate limited to 30 req/min per user/IP)
       if (isUsageRequest) {
+        const usgRateLimit = await checkRateLimit(env, `usage:${userId}`, 30, 60);
+        if (!usgRateLimit.allowed) {
+          return new Response(JSON.stringify({ error: "Too many usage checks. Please slow down." }), {
+            status: 429,
+            headers: {
+              "Content-Type": "application/json",
+              "Retry-After": usgRateLimit.reset.toString(),
+              ...corsHeaders
+            }
+          });
+        }
+
         return new Response(JSON.stringify({ usageCount, userPlan, customerPortalUrl }), {
           headers: {
             "Content-Type": "application/json",
+            "X-RateLimit-Limit": usgRateLimit.limit.toString(),
+            "X-RateLimit-Remaining": usgRateLimit.remaining.toString(),
             ...corsHeaders
           }
         });
       }
 
-      // Extract Prompt, incrementUsage, and fields schema from extension request
-      const requestBody = await request.json();
-      const prompt = requestBody.prompt;
-      const incrementUsage = requestBody.incrementUsage;
-      const schemaFields = requestBody.schemaFields;
+      // Safe Body Parsing & Input Validation
+      const requestBody = await request.json().catch(() => null);
+      if (!requestBody || typeof requestBody !== 'object') {
+        return new Response(JSON.stringify({ error: "Invalid JSON request body." }), {
+          status: 400,
+          headers: { "Content-Type": "application/json", ...corsHeaders }
+        });
+      }
 
-      if (prompt === "PING_TEST") {
+      const rawPrompt = requestBody.prompt;
+      if (rawPrompt === "PING_TEST") {
         return new Response(JSON.stringify({ success: true, message: "pong" }), {
           headers: { "Content-Type": "application/json", ...corsHeaders }
         });
       }
 
-      // 5. Check Limits before Generation
+      const prompt = typeof rawPrompt === 'string' ? rawPrompt.trim() : '';
+      if (!prompt || prompt.length > 32768) {
+        return new Response(JSON.stringify({ error: "Invalid prompt. Must be a non-empty string under 32,768 characters." }), {
+          status: 400,
+          headers: { "Content-Type": "application/json", ...corsHeaders }
+        });
+      }
+
+      const incrementUsage = requestBody.incrementUsage !== false;
+      const rawSchemaFields = Array.isArray(requestBody.schemaFields) ? requestBody.schemaFields : [];
+      const schemaFields = rawSchemaFields
+        .slice(0, 100)
+        .filter(f => f && typeof f.id === 'string' && /^[a-zA-Z0-9_\-]{1,64}$/.test(f.id.trim()))
+        .map(f => ({
+          id: f.id.trim(),
+          type: typeof f.type === 'string' ? f.type.slice(0, 32) : 'text',
+          label: typeof f.label === 'string' ? f.label.slice(0, 128) : '',
+          placeholder: typeof f.placeholder === 'string' ? f.placeholder.slice(0, 128) : ''
+        }));
+
+      // 5. Check Limits & Per-Client Rate Limiting before Generation
       if (incrementUsage !== false) {
         if (userPlan === "Anonymous Tier" && usageCount >= 10) {
           return new Response(
@@ -272,6 +379,32 @@ export default {
                 "Content-Type": "application/json", 
                 ...corsHeaders
               } 
+            }
+          );
+        }
+
+        // Sliding-window counter rate limit based on plan tier (Pro: 60, Free: 20, Anon: 10 req/min)
+        const limitByPlan = {
+          "Pro Plan": 60,
+          "Free Tier": 20,
+          "Anonymous Tier": 10
+        };
+        const tierLimit = limitByPlan[userPlan] || 10;
+        const aiRateLimit = await checkRateLimit(env, `ai:${userId}`, tierLimit, 60);
+
+        if (!aiRateLimit.allowed) {
+          return new Response(
+            JSON.stringify({ error: `Rate limit exceeded (${tierLimit} requests/minute). Please wait ${aiRateLimit.reset} seconds.` }),
+            {
+              status: 429,
+              headers: {
+                "Content-Type": "application/json",
+                "X-RateLimit-Limit": aiRateLimit.limit.toString(),
+                "X-RateLimit-Remaining": "0",
+                "X-RateLimit-Reset": aiRateLimit.reset.toString(),
+                "Retry-After": aiRateLimit.reset.toString(),
+                ...corsHeaders
+              }
             }
           );
         }
@@ -306,7 +439,14 @@ export default {
         }
       }
 
-      const models = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.1-pro-preview", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.5-flash-lite"];
+      // Stable production Gemini models with ordered fallback cascade
+      const models = [
+        "gemini-2.5-flash",
+        "gemini-2.5-pro",
+        "gemini-1.5-flash",
+        "gemini-1.5-pro"
+      ];
+
       let response = null;
       let lastError = null;
 
@@ -342,7 +482,8 @@ export default {
             break; // Success!
           } else {
             const errText = await res.text();
-            console.warn(`[AutoFill AI Proxy] Model ${modelName} failed with status ${res.status}: ${errText}`);
+            const sanitizedErr = errText.slice(0, 200).replace(/[\r\n]+/g, ' ');
+            console.warn(`[AutoFill AI Proxy] Model ${modelName} returned status ${res.status}: ${sanitizedErr}. Attempting failover cascade...`);
             
             let cleanErr = errText;
             try {
@@ -378,8 +519,8 @@ export default {
       }
 
       if (!response) {
-        const errMessage = lastError ? lastError.message : "All Gemini model endpoints failed.";
-        return new Response(JSON.stringify({ error: `Gemini API Error: ${errMessage}` }), { 
+        console.error("[AutoFill AI Proxy Error] All model attempts failed:", lastError ? lastError.message : "Unknown failure");
+        return new Response(JSON.stringify({ error: "AI generation service is temporarily unavailable. Please try again shortly." }), { 
           status: 502,
           headers: {
             "Content-Type": "application/json",
@@ -431,7 +572,8 @@ export default {
       });
 
     } catch (err) {
-      return new Response(JSON.stringify({ error: `Server Error: ${err.message}` }), {
+      console.error("[AutoFill AI Proxy Fatal Error]:", err.message || err);
+      return new Response(JSON.stringify({ error: "An unexpected server error occurred." }), {
         status: 500,
         headers: {
           "Content-Type": "application/json",
@@ -441,275 +583,3 @@ export default {
     }
   },
 };
-
-/**
- * JWT Verification Helper
- */
-// Cache JWKS in memory to avoid fetching on every request
-let cachedJwks = null;
-let jwksExpiry = 0;
-
-async function getJwks(supabaseUrl, supabaseAnonKey) {
-  const now = Date.now();
-  if (cachedJwks && now < jwksExpiry) {
-    return cachedJwks;
-  }
-
-  const certsUrl = `${supabaseUrl}/auth/v1/.well-known/jwks.json`;
-  const res = await fetch(certsUrl, {
-    headers: {
-      'apikey': supabaseAnonKey
-    }
-  });
-
-  if (!res.ok) {
-    throw new Error(`Failed to fetch JWKS from Supabase: ${res.statusText}`);
-  }
-
-  const jwks = await res.json();
-  cachedJwks = jwks;
-  jwksExpiry = now + 10 * 60 * 1000; // cache for 10 minutes
-  return jwks;
-}
-
-/**
- * JWT Verification Helper (Supports both legacy HS256 symmetric secret & P-256 ES256 asymmetric JWKS certs)
- */
-async function verifyJWT(token, env) {
-  const parts = token.split('.');
-  if (parts.length !== 3) {
-    throw new Error('Invalid token structure');
-  }
-  
-  const [headerB64, payloadB64, signatureB64] = parts;
-
-  // Decode header to inspect algorithm and Key ID
-  const headerPadding = '='.repeat((4 - (headerB64.length % 4)) % 4);
-  const headerBase64 = (headerB64 + headerPadding).replace(/-/g, '+').replace(/_/g, '/');
-  const headerJson = atob(headerBase64);
-  const header = JSON.parse(headerJson);
-  const alg = header.alg;
-  const kid = header.kid;
-
-  let verified = false;
-
-  if (alg === 'ES256') {
-    // Asymmetric ECC verification via Supabase JWKS certs
-    const supabaseUrl = env.SUPABASE_URL;
-    const supabaseAnonKey = env.SUPABASE_ANON_KEY;
-    if (!supabaseUrl || !supabaseAnonKey) {
-      throw new Error("Asymmetric token detected (ES256), but SUPABASE_URL and SUPABASE_ANON_KEY are not configured in environment variables.");
-    }
-
-    const jwks = await getJwks(supabaseUrl, supabaseAnonKey);
-    const jwk = jwks.keys?.find(k => k.kid === kid);
-    if (!jwk) {
-      throw new Error(`No public key found in JWKS matching key ID: ${kid}`);
-    }
-
-    const key = await crypto.subtle.importKey(
-      'jwk',
-      jwk,
-      {
-        name: 'ECDSA',
-        namedCurve: 'P-256'
-      },
-      false,
-      ['verify']
-    );
-
-    const signature = base64UrlToUint8Array(signatureB64);
-    const data = new TextEncoder().encode(`${headerB64}.${payloadB64}`);
-    verified = await crypto.subtle.verify(
-      {
-        name: 'ECDSA',
-        hash: { name: 'SHA-256' }
-      },
-      key,
-      signature,
-      data
-    );
-  } else if (alg === 'HS256') {
-    // Legacy Symmetric HS256 secret verification
-    const secret = env.SUPABASE_JWT_SECRET || env.JWT_SECRET;
-    if (!secret) {
-      throw new Error("SUPABASE_JWT_SECRET secret is missing in environment variables.");
-    }
-
-    const encoder = new TextEncoder();
-    const secretKeyData = encoder.encode(secret);
-    const key = await crypto.subtle.importKey(
-      'raw',
-      secretKeyData,
-      { name: 'HMAC', hash: 'SHA-256' },
-      false,
-      ['verify']
-    );
-
-    const signature = base64UrlToUint8Array(signatureB64);
-    const data = encoder.encode(`${headerB64}.${payloadB64}`);
-    verified = await crypto.subtle.verify(
-      'HMAC',
-      key,
-      signature,
-      data
-    );
-  } else {
-    throw new Error(`Unsupported JWT signing algorithm: ${alg}`);
-  }
-
-  if (!verified) {
-    throw new Error('JWT signature verification failed');
-  }
-
-  // Decode payload with padding correction
-  const padding = '='.repeat((4 - (payloadB64.length % 4)) % 4);
-  const base64 = (payloadB64 + padding).replace(/-/g, '+').replace(/_/g, '/');
-  const payloadJson = atob(base64);
-  const payload = JSON.parse(payloadJson);
-
-  // Expiration validation
-  const now = Math.floor(Date.now() / 1000);
-  if (payload.exp && now > payload.exp) {
-    throw new Error('JWT token expired');
-  }
-
-  return payload;
-}
-
-function base64UrlToUint8Array(base64Url) {
-  const padding = '='.repeat((4 - (base64Url.length % 4)) % 4);
-  const base64 = (base64Url + padding).replace(/-/g, '+').replace(/_/g, '/');
-  const rawData = atob(base64);
-  const outputArray = new Uint8Array(rawData.length);
-  for (let i = 0; i < rawData.length; ++i) {
-    outputArray[i] = rawData.charCodeAt(i);
-  }
-  return outputArray;
-}
-
-/**
- * Lemon Squeezy Signature Verification Helper (Native Web Crypto HMAC SHA-256)
- */
-async function verifyLemonSqueezySignature(bodyText, signatureHeader, secret) {
-  if (!signatureHeader || !secret) return false;
-  
-  const encoder = new TextEncoder();
-  const secretKeyData = encoder.encode(secret);
-  
-  const key = await crypto.subtle.importKey(
-    'raw',
-    secretKeyData,
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['verify']
-  );
-  
-  const signatureBytes = hexToUint8Array(signatureHeader);
-  const verified = await crypto.subtle.verify(
-    'HMAC',
-    key,
-    signatureBytes,
-    encoder.encode(bodyText)
-  );
-  
-  return verified;
-}
-
-function hexToUint8Array(hexString) {
-  const badCharacters = /[^0-9a-fA-F]/g;
-  if (badCharacters.test(hexString) || hexString.length % 2 !== 0) {
-    return new Uint8Array(0);
-  }
-  const result = new Uint8Array(hexString.length / 2);
-  for (let i = 0; i < result.length; i++) {
-    result[i] = parseInt(hexString.substring(i * 2, i * 2 + 2), 16);
-  }
-  return result;
-}
-
-/**
- * Supabase DB Integration Helpers
- */
-async function getSupabaseProfile(userId, env) {
-  const supabaseUrl = env.SUPABASE_URL;
-  const supabaseKey = env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_ANON_KEY;
-  if (!supabaseUrl || !supabaseKey) return null;
-
-  try {
-    const url = `${supabaseUrl}/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}&select=plan,usage_count,customer_portal_url`;
-    const res = await fetch(url, {
-      method: "GET",
-      headers: {
-        "apikey": supabaseKey,
-        "Authorization": `Bearer ${supabaseKey}`
-      }
-    });
-    if (!res.ok) {
-      console.warn(`[Supabase] Profile lookup returned status ${res.status}`);
-      return null;
-    }
-    const data = await res.json();
-    return data[0] || null;
-  } catch (err) {
-    console.error("[Supabase] Profile lookup failed:", err.message || err);
-    return null;
-  }
-}
-
-async function incrementSupabaseUsage(userId, env) {
-  const supabaseUrl = env.SUPABASE_URL;
-  const supabaseKey = env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_ANON_KEY;
-  if (!supabaseUrl || !supabaseKey) return null;
-
-  try {
-    const url = `${supabaseUrl}/rest/v1/rpc/increment_usage`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "apikey": supabaseKey,
-        "Authorization": `Bearer ${supabaseKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ user_id: userId })
-    });
-    if (!res.ok) {
-      console.warn(`[Supabase] Atomic increment RPC returned status ${res.status}`);
-      return null;
-    }
-    const data = await res.json();
-    return typeof data === "number" ? data : (data && typeof data.usage_count === "number" ? data.usage_count : null);
-  } catch (err) {
-    console.error("[Supabase] Atomic increment RPC failed:", err.message || err);
-    return null;
-  }
-}
-
-async function updateSupabaseProfilePlan(userId, plan, customerPortalUrl, env) {
-  const supabaseUrl = env.SUPABASE_URL;
-  const supabaseKey = env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_ANON_KEY;
-  if (!supabaseUrl || !supabaseKey) return false;
-
-  try {
-    const url = `${supabaseUrl}/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}`;
-    const res = await fetch(url, {
-      method: "POST", // POST with resolution=merge-duplicates does upsert
-      headers: {
-        "apikey": supabaseKey,
-        "Authorization": `Bearer ${supabaseKey}`,
-        "Content-Type": "application/json",
-        "Prefer": "resolution=merge-duplicates"
-      },
-      body: JSON.stringify({
-        id: userId,
-        plan: plan,
-        customer_portal_url: customerPortalUrl || "",
-        updated_at: new Date().toISOString()
-      })
-    });
-    return res.ok;
-  } catch (err) {
-    console.error("[Supabase] Profile upsert failed:", err.message || err);
-    return false;
-  }
-}

@@ -1,43 +1,46 @@
 import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold, SchemaType } from "@google/generative-ai";
 import type { Schema } from "@google/generative-ai";
 import type { FormField } from "../content/scraper";
+import { ENV } from "../config/env";
 
 console.log('✨ AutoFill AI Background Service Worker Initializing...');
 
 // Add a context menu for quick fills
 chrome.runtime.onInstalled.addListener((details) => {
-  chrome.contextMenus.create({
-    id: "autofill-magic",
-    title: "✨ AutoFill AI",
-    contexts: ["editable", "page"]
-  });
-  
-  chrome.contextMenus.create({
-    parentId: "autofill-magic",
-    id: "fill-default",
-    title: "Fill Form (Realistic Persona)",
-    contexts: ["editable", "page"]
-  });
-  
-  chrome.contextMenus.create({
-    parentId: "autofill-magic",
-    id: "fill-profile",
-    title: "Fill Form (My Real Profile)",
-    contexts: ["editable", "page"]
-  });
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({
+      id: "autofill-magic",
+      title: "✨ AutoFill AI",
+      contexts: ["editable", "page"]
+    });
+    
+    chrome.contextMenus.create({
+      parentId: "autofill-magic",
+      id: "fill-default",
+      title: "Fill Form (Realistic Persona)",
+      contexts: ["editable", "page"]
+    });
+    
+    chrome.contextMenus.create({
+      parentId: "autofill-magic",
+      id: "fill-profile",
+      title: "Fill Form (My Real Profile)",
+      contexts: ["editable", "page"]
+    });
 
-  chrome.contextMenus.create({
-    parentId: "autofill-magic",
-    id: "fill-qa",
-    title: "Fill Form (QA Edge Cases)",
-    contexts: ["editable", "page"]
-  });
+    chrome.contextMenus.create({
+      parentId: "autofill-magic",
+      id: "fill-qa",
+      title: "Fill Form (QA Edge Cases)",
+      contexts: ["editable", "page"]
+    });
 
-  chrome.contextMenus.create({
-    parentId: "autofill-magic",
-    id: "fill-b2b",
-    title: "Fill Form (B2B Enterprise Profile)",
-    contexts: ["editable", "page"]
+    chrome.contextMenus.create({
+      parentId: "autofill-magic",
+      id: "fill-b2b",
+      title: "Fill Form (B2B Enterprise Profile)",
+      contexts: ["editable", "page"]
+    });
   });
 
   if (details.reason === 'install') {
@@ -168,7 +171,7 @@ async function handleGenerateData(fields: FormField[], persona: string, customPr
     
     // Send a single completion request for all fields
     const rawResult = await generateAICompletion(prompt, settings, true, fields);
-    console.log(`[AutoFill AI] Raw LLM output received:`, rawResult);
+    console.log(`[AutoFill AI] LLM output received successfully (${rawResult.length} characters).`);
 
     const jsonMatch = rawResult.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
@@ -344,28 +347,39 @@ CRITICAL RULES FOR PROFILE FILLING:
 }
 
 async function generateAICompletion(prompt: string, settings: Record<string, string | number | boolean | undefined>, incrementUsage?: boolean, fields?: FormField[]) {
-  const provider = settings.aiProvider || 'cloud';
+  let provider = settings.aiProvider || 'cloud';
   
   if (provider === 'local') {
-    const winAi = typeof window !== 'undefined' ? (window as { ai?: { languageModel?: { create: (opt?: Record<string, unknown>) => Promise<{ prompt: (p: string) => Promise<string>; destroy: () => void }> } } }).ai : undefined;
-    const ai = (self as unknown as { ai?: { languageModel?: { create: (opt?: Record<string, unknown>) => Promise<{ prompt: (p: string) => Promise<string>; destroy: () => void }> } } }).ai || (chrome as unknown as { aiOriginTrial?: { languageModel?: { create: (opt?: Record<string, unknown>) => Promise<{ prompt: (p: string) => Promise<string>; destroy: () => void }> } } }).aiOriginTrial || winAi;
-    
-    if (ai && ai.languageModel) {
-      const session = await ai.languageModel.create({
-        systemPrompt: "You are a precise form-filler AI. You output raw JSON only."
-      });
-      const response = await session.prompt(prompt);
-      session.destroy();
-      return response;
-    } else {
-      throw new Error("Chrome's Local Gemini Nano is not enabled on this browser. Enable it in chrome://flags or switch to Google Pro/Cloud in settings.");
+    try {
+      const winAi = typeof window !== 'undefined' ? (window as { ai?: { languageModel?: { create: (opt?: Record<string, unknown>) => Promise<{ prompt: (p: string) => Promise<string>; destroy: () => void }> } } }).ai : undefined;
+      const ai = (self as unknown as { ai?: { languageModel?: { create: (opt?: Record<string, unknown>) => Promise<{ prompt: (p: string) => Promise<string>; destroy: () => void }> } } }).ai || (chrome as unknown as { aiOriginTrial?: { languageModel?: { create: (opt?: Record<string, unknown>) => Promise<{ prompt: (p: string) => Promise<string>; destroy: () => void }> } } }).aiOriginTrial || winAi;
+      
+      if (ai && ai.languageModel) {
+        const session = await ai.languageModel.create({
+          systemPrompt: "You are a precise form-filler AI. You output raw JSON only."
+        });
+        const response = await session.prompt(prompt);
+        session.destroy();
+        return response;
+      }
+    } catch (localErr) {
+      console.warn("[AutoFill AI] Local Gemini Nano execution failed, falling back to Cloud mode:", localErr);
     }
+    console.warn("[AutoFill AI] Local Gemini Nano is unavailable in this browser. Falling back to Cloud Express Mode.");
+    provider = 'cloud';
   }
 
   if (provider === 'gemini') {
     if (!settings.geminiApiKey) throw new Error("Google Gemini API Key is missing. Add it in Options.");
     const genAI = new GoogleGenerativeAI(settings.geminiApiKey as string);
-    const models = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.1-pro-preview", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.5-flash-lite"];
+    
+    // Stable production Gemini models with ordered fallback cascade
+    const models = [
+      "gemini-2.5-flash",
+      "gemini-2.5-pro",
+      "gemini-1.5-flash",
+      "gemini-1.5-pro"
+    ];
     let lastError: unknown = null;
 
     let responseSchema: Schema | undefined = undefined;
@@ -510,8 +524,8 @@ async function generateAICompletion(prompt: string, settings: Record<string, str
     return data.content[0].text;
   }
 
-  // Cloud proxy — use custom cloudProxyUrl if configured, otherwise fallback to canonical URL
-  const cloudUrl = (settings.cloudProxyUrl as string) || 'https://autofill-ai-proxy.vinaykondabattula.workers.dev';
+  // Cloud proxy — use custom cloudProxyUrl if configured, otherwise fallback to environment URL
+  const cloudUrl = (settings.cloudProxyUrl as string) || ENV.CLOUD_PROXY_URL;
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json'
@@ -655,7 +669,7 @@ function parseRobustJSON(str: string, keys?: string[]): Record<string, unknown> 
     
     return JSON.parse(result);
   } catch (innerErr) {
-    console.warn("All JSON parse attempts failed. Raw text was:", str);
+    console.warn("All JSON parse attempts failed for LLM response.");
     throw innerErr;
   }
 }
@@ -789,7 +803,7 @@ async function handleTestConnection(provider: string, key: string, proxyUrl?: st
   }
 
   if (provider === 'cloud') {
-    const url = proxyUrl || 'https://autofill-ai-proxy.vinaykondabattula.workers.dev';
+    const url = proxyUrl || ENV.CLOUD_PROXY_URL;
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

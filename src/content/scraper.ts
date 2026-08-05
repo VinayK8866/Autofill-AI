@@ -256,7 +256,7 @@ export const injectValue = (fieldId: string, value: string) => {
   const isSelect = el instanceof HTMLSelectElement;
 
   if (el.getAttribute('contenteditable') === 'true') {
-    el.innerHTML = value;
+    el.textContent = value;
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
     return;
