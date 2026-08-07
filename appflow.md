@@ -1,6 +1,6 @@
-# AutoFill AI - User Flow and Onboarding Architecture
+# Filli AI - User Flow and Onboarding Architecture
 
-This document describes the onboarding and execution flow of the AutoFill AI Chrome extension.
+This document describes the onboarding and execution flow of the Filli AI Chrome extension.
 
 ## Onboarding & Authentication Flow
 
@@ -31,7 +31,7 @@ graph TD
     *   A "Back" button lets them return to the Walkthrough screen.
 5. **Onboarding Complete Screen (Step 3):**
     *   Confirms successful setup (saved or skipped). If saved, it lets the user know they can still choose the "Default" persona in the side dock to fill forms with random mock details anytime.
-    *   Provides visual instructions on how to **pin the extension** in Chrome's toolbar (clicking the puzzle piece and pinning AutoFill AI).
+    *   Provides visual instructions on how to **pin the extension** in Chrome's toolbar (clicking the puzzle piece and pinning Filli AI).
     *   Gives 3-step instructions on how to trigger autofilling on active pages.
     *   Includes a manual "Done & Close Settings" CTA that closes the tab.
 6. Robust phone number formatting validation runs when the phone field loses focus (`onBlur`), warning the user of formatting anomalies without interrupting active typing.
@@ -40,7 +40,7 @@ graph TD
 1. The extension functions instantly out-of-the-box using private keys or built-in local AI models:
     *   **Local Nano:** Completely private, offline, and free via Chrome's built-in AI.
     *   **Private API Keys:** Direct connection from extension to OpenAI/Gemini/Anthropic models using the user's own keys.
-2. Users only register or log in (via Supabase auth) to use our hosted Autofill AI tier. The free authenticated tier includes 50 monthly fills, with an upgrade to the **Unlimited Pro Cloud Tier** to unlock unlimited fills.
+2. Users only register or log in (via Supabase auth) to use our hosted Filli AI tier. The free authenticated tier includes 50 monthly fills, with an upgrade to the **Unlimited Pro Cloud Tier** to unlock unlimited fills.
 
 ### Phase 3: Form Detection & In-Page Interaction
 1. When visiting any site, the content script ([content.ts](file:///home/user/Private_View/Vinay/DummyDataFiller/src/content/content.ts)) checks for input fields.

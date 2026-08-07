@@ -383,6 +383,22 @@ class MagicCommandDock {
         `;
       } else if (this.currentPersona === 'profile' && !this.hasProfile) {
         btnText = 'Configure Profile Card';
+      } else if (this.currentPersona === 'qa') {
+        btnText = '⚡ Fill QA Edge Cases';
+        btnClass += ' af-btn-qa';
+        btnIcon = `
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="m8 2 1.88 1.88"></path>
+            <path d="M14.12 3.88 16 2"></path>
+            <path d="M9 7.13v-1a3.003 3.003 0 0 1 6 0v1"></path>
+            <path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6z"></path>
+            <path d="M12 20v-9"></path>
+            <path d="M6.53 9C4.6 9.8 3 11.4 3 14"></path>
+            <path d="M6 18c-2 0-3-1-3-3"></path>
+            <path d="M17.47 9c1.93.8 3.53 2.4 3.53 5"></path>
+            <path d="M18 18c2 0 3-1 3-3"></path>
+          </svg>
+        `;
       }
 
       this.dockContainer.innerHTML = `
@@ -570,8 +586,9 @@ class MagicCommandDock {
               <span>${btnText}</span>
             </button>
             <div class="af-dock-subactions">
+              <button class="af-btn-qa-quick" id="af-qa-btn" title="Fill Boundary & Edge Case Payloads Instantly">⚡ Edge Cases</button>
               <button class="af-btn-secondary" id="af-rescan-btn">Re-Scan</button>
-              <button class="af-btn-danger" id="af-clear-btn">Clear Form</button>
+              <button class="af-btn-danger" id="af-clear-btn">Clear</button>
             </div>
             <!-- Error Alert -->
             <div class="af-dock-error" id="af-error-alert" style="display: none;">
@@ -665,6 +682,10 @@ class MagicCommandDock {
       // Fill Button
       const fillBtn = this.dockContainer.querySelector('#af-fill-btn') as HTMLButtonElement;
       fillBtn?.addEventListener('click', () => this.handleFill());
+
+      // Direct QA Edge Cases Button
+      const qaBtn = this.dockContainer.querySelector('#af-qa-btn') as HTMLButtonElement;
+      qaBtn?.addEventListener('click', () => this.handleFill('qa'));
 
       // Re-scan Button
       const rescanBtn = this.dockContainer.querySelector('#af-rescan-btn') as HTMLButtonElement;
@@ -918,6 +939,7 @@ class MagicCommandDock {
     }
 
     const fields = FormScraper.scrapeForms();
+    const pageContext = FormScraper.scrapePageContext();
     if (fields.length === 0) {
       this.isLoading = false;
       if (fillBtn) {
@@ -929,12 +951,13 @@ class MagicCommandDock {
     }
 
     try {
-      console.log(`Sending fields to background AI engine. Persona: ${persona}. Prompt instruction length: ${prompt.length}`);
+      console.log(`Sending fields to background AI engine. Persona: ${persona}. Domain: ${pageContext.domain}. Prompt instruction length: ${prompt.length}`);
 
       const response = await new Promise<Record<string, string> | null | undefined>((resolve) => {
         chrome.runtime.sendMessage({
           action: 'generate_data',
           fields: fields,
+          pageContext: pageContext,
           persona: persona,
           customPrompt: prompt
         }, (res) => {
@@ -947,43 +970,15 @@ class MagicCommandDock {
       });
 
       if (response && !response.error) {
-        // Inject values sequentially with dynamic wave glow pulses
-        let count = 0;
-        Object.entries(response).forEach(([fieldId, value]) => {
-          setTimeout(() => {
-            injectValue(fieldId, value as string);
+        const initialFieldIds = new Set(fields.map(f => f.id));
+        const totalCount = await this.injectValuesAndCheckDynamicFields(
+          response as Record<string, string>,
+          initialFieldIds,
+          persona,
+          prompt
+        );
 
-            // Add wave pulse styling to show fill activity
-            const inputEl = document.querySelector(`[data-autofill-id="${CSS.escape(fieldId)}"]`) ||
-              document.getElementById(fieldId) ||
-              document.querySelector(`[name="${CSS.escape(fieldId)}"]`);
-            if (inputEl) {
-              inputEl.classList.add('af-filled-pulse');
-
-              // Spawn smooth micro white/purple sparkle over field
-              const rect = inputEl.getBoundingClientRect();
-              if (rect.width > 0 && rect.height > 0) {
-                const sparkle = document.createElement('span');
-                sparkle.className = 'af-sparkle-overlay';
-                sparkle.innerHTML = `<svg width="2" height="2" viewBox="0 0 24 24" fill="#ffffff" style="filter: drop-shadow(0 0 5px #6366f1);"><path d="M12 0L14.59 9.41L24 12L14.59 14.59L12 24L9.41 14.59L0 12L9.41 9.41L12 0Z"/></svg>`;
-                sparkle.style.top = `${window.scrollY + rect.top + (rect.height / 2) - 8}px`;
-                sparkle.style.left = `${window.scrollX + rect.right - 22}px`;
-                document.body.appendChild(sparkle);
-
-                setTimeout(() => {
-                  sparkle.remove();
-                }, 1200);
-              }
-
-              setTimeout(() => {
-                inputEl.classList.remove('af-filled-pulse');
-              }, 1500);
-            }
-          }, count * 80); // 80ms wave interval
-          count++;
-        });
-
-        const totalFillDuration = count * 80;
+        const totalFillDuration = totalCount * 80;
         const resetDelay = Math.max(1500, totalFillDuration);
         if (fillBtn) {
           fillBtn.innerHTML = `<span>✨ Magic complete!</span>`;
@@ -1035,6 +1030,110 @@ class MagicCommandDock {
       }
       return { success: false, error: message };
     }
+  }
+
+  private async injectValuesAndCheckDynamicFields(
+    response: Record<string, string>,
+    initialFieldIds: Set<string>,
+    persona: string,
+    prompt: string
+  ): Promise<number> {
+    let count = 0;
+    const entries = Object.entries(response);
+
+    // Pass 1: Inject initial scraped values
+    entries.forEach(([fieldId, value]) => {
+      setTimeout(() => {
+        injectValue(fieldId, value as string);
+
+        const inputEl = document.querySelector(`[data-autofill-id="${CSS.escape(fieldId)}"]`) ||
+          document.getElementById(fieldId) ||
+          document.querySelector(`[name="${CSS.escape(fieldId)}"]`);
+        if (inputEl) {
+          inputEl.classList.add('af-filled-pulse');
+
+          const rect = inputEl.getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) {
+            const sparkle = document.createElement('span');
+            sparkle.className = 'af-sparkle-overlay';
+            sparkle.innerHTML = `<svg width="2" height="2" viewBox="0 0 24 24" fill="#ffffff" style="filter: drop-shadow(0 0 5px #6366f1);"><path d="M12 0L14.59 9.41L24 12L14.59 14.59L12 24L9.41 14.59L0 12L9.41 9.41L12 0Z"/></svg>`;
+            sparkle.style.top = `${window.scrollY + rect.top + (rect.height / 2) - 8}px`;
+            sparkle.style.left = `${window.scrollX + rect.right - 22}px`;
+            document.body.appendChild(sparkle);
+
+            setTimeout(() => {
+              sparkle.remove();
+            }, 1200);
+          }
+
+          setTimeout(() => {
+            inputEl.classList.remove('af-filled-pulse');
+          }, 1500);
+        }
+      }, count * 80);
+      count++;
+    });
+
+    const initialFillTime = count * 80;
+
+    // Reactive Settling Window: Wait 350ms for framework DOM updates (React/Vue/Angular state updates)
+    await new Promise(resolve => setTimeout(resolve, initialFillTime + 350));
+
+    // Pass 2: Re-scan DOM for newly spawned dynamic conditional fields
+    const currentFields = FormScraper.scrapeForms();
+    const newFields = currentFields.filter(f => !initialFieldIds.has(f.id));
+
+    if (newFields.length > 0) {
+      console.log(`[AutoFill AI] Detected ${newFields.length} newly rendered dynamic conditional fields after Pass 1 injection! Running Pass 2 reactive fill...`);
+
+      const updatedPageContext = FormScraper.scrapePageContext();
+
+      const parentSelections: string[] = [];
+      entries.forEach(([id, val]) => {
+        if (val && typeof val === 'string' && val.length < 60) {
+          parentSelections.push(`${id}: "${val}"`);
+        }
+      });
+
+      const secondaryCustomPrompt = (prompt ? prompt + "\n" : "") +
+        `PARENT SELECTIONS MADE IN PASS 1: [${parentSelections.join(', ')}]. Fill newly rendered conditional fields to match these selections.`;
+
+      const secondaryResponse = await new Promise<Record<string, string> | null | undefined>((resolve) => {
+        chrome.runtime.sendMessage({
+          action: 'generate_data',
+          fields: newFields,
+          pageContext: updatedPageContext,
+          persona: persona,
+          customPrompt: secondaryCustomPrompt
+        }, (res) => {
+          if (chrome.runtime.lastError) resolve(null);
+          else resolve(res as Record<string, string> | null | undefined);
+        });
+      });
+
+      if (secondaryResponse && !secondaryResponse.error) {
+        let secondCount = 0;
+        Object.entries(secondaryResponse).forEach(([fieldId, value]) => {
+          setTimeout(() => {
+            injectValue(fieldId, value as string);
+
+            const inputEl = document.querySelector(`[data-autofill-id="${CSS.escape(fieldId)}"]`) ||
+              document.getElementById(fieldId) ||
+              document.querySelector(`[name="${CSS.escape(fieldId)}"]`);
+            if (inputEl) {
+              inputEl.classList.add('af-filled-pulse');
+              setTimeout(() => {
+                inputEl.classList.remove('af-filled-pulse');
+              }, 1500);
+            }
+          }, secondCount * 80);
+          secondCount++;
+        });
+        count += secondCount;
+      }
+    }
+
+    return count;
   }
 
   private getFriendlyErrorMessage(rawError: string): string {

@@ -306,7 +306,7 @@ export const Options = () => {
             <CardHeader className="space-y-3 pb-8 pt-10 px-10">
               <div className="flex items-center justify-between">
                 <Badge variant="outline" className="text-indigo-600 border-indigo-100 bg-indigo-50/50 px-3 py-1 rounded-full text-[10px] font-bold tracking-widest uppercase">
-                  {activeTab === 'account' ? (isLoggedIn ? 'Account' : 'Sign In / Sign Up') : activeTab === 'profile' ? 'My Autofill Card' : 'Developer Controls'}
+                  {activeTab === 'account' ? (isLoggedIn ? 'Account' : 'Sign In / Sign Up') : activeTab === 'profile' ? 'My Filli Card' : 'Developer Controls'}
                 </Badge>
                 {isLoggedIn && activeTab === 'account' && (
                   <span className="text-[10px] font-black text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-100 flex items-center gap-1 uppercase tracking-widest animate-pulse">

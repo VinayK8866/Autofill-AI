@@ -13,6 +13,15 @@ export interface FormField {
   maxLength?: number;
 }
 
+export interface PageContext {
+  title: string;
+  domain: string;
+  url: string;
+  description?: string;
+  headings?: string[];
+  formHeading?: string;
+}
+
 export class FormScraper {
   /**
    * Recursively finds all form-associated elements, even those inside Shadow DOMs.
@@ -207,6 +216,76 @@ export class FormScraper {
     }
 
     return '';
+  }
+
+  static scrapePageContext(targetElement?: HTMLElement): PageContext {
+    const title = document.title?.trim() || '';
+    const domain = window.location.hostname || '';
+    const url = window.location.href || '';
+
+    // Extract meta description
+    let description = '';
+    const metaDesc = document.querySelector('meta[name="description"], meta[property="og:description"]');
+    if (metaDesc) {
+      description = (metaDesc.getAttribute('content') || '').trim().slice(0, 250);
+    }
+
+    // Extract visible page headings (H1, H2, H3), excluding nav / footer noise
+    const headingElements = Array.from(document.querySelectorAll('h1, h2, h3'));
+    const headings: string[] = [];
+    const seenText = new Set<string>();
+
+    for (const h of headingElements) {
+      const rect = h.getBoundingClientRect();
+      if (rect.width <= 2 || rect.height <= 2) continue;
+      const computedStyle = window.getComputedStyle(h);
+      if (computedStyle.display === 'none' || computedStyle.visibility === 'hidden') continue;
+
+      const text = h.textContent?.replace(/\s+/g, ' ').trim();
+      if (text && text.length >= 3 && text.length <= 150) {
+        const lower = text.toLowerCase();
+        if (!seenText.has(lower) && !['menu', 'navigation', 'footer', 'search', 'home', 'cookie policy'].includes(lower)) {
+          seenText.add(lower);
+          headings.push(text);
+          if (headings.length >= 5) break;
+        }
+      }
+    }
+
+    // Extract specific form heading or legend
+    let formHeading = '';
+    const formEl = targetElement ? targetElement.closest('form') : document.querySelector('form');
+    if (formEl) {
+      const legend = formEl.querySelector('legend');
+      if (legend && legend.textContent?.trim()) {
+        formHeading = legend.textContent.replace(/\s+/g, ' ').trim();
+      } else {
+        const formH = formEl.querySelector('h1, h2, h3, h4');
+        if (formH && formH.textContent?.trim()) {
+          formHeading = formH.textContent.replace(/\s+/g, ' ').trim();
+        }
+      }
+    }
+
+    // Fallback: Check if targetElement has a parent section/container header
+    if (!formHeading && targetElement) {
+      const parentSection = targetElement.closest('section, article, div[class*="form"], div[class*="container"]');
+      if (parentSection) {
+        const sectionH = parentSection.querySelector('h1, h2, h3, h4');
+        if (sectionH && sectionH.textContent?.trim()) {
+          formHeading = sectionH.textContent.replace(/\s+/g, ' ').trim();
+        }
+      }
+    }
+
+    return {
+      title,
+      domain,
+      url,
+      description: description || undefined,
+      headings: headings.length > 0 ? headings : undefined,
+      formHeading: formHeading || undefined
+    };
   }
 }
 

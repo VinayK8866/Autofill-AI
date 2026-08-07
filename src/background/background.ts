@@ -1,16 +1,17 @@
 import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold, SchemaType } from "@google/generative-ai";
 import type { Schema } from "@google/generative-ai";
-import type { FormField } from "../content/scraper";
+import type { FormField, PageContext } from "../content/scraper";
+import { QAGenerator } from "../lib/qaGenerator";
 import { ENV } from "../config/env";
 
-console.log('✨ AutoFill AI Background Service Worker Initializing...');
+console.log('⚡ Filli AI Background Service Worker Initializing...');
 
 // Add a context menu for quick fills
 chrome.runtime.onInstalled.addListener((details) => {
   chrome.contextMenus.removeAll(() => {
     chrome.contextMenus.create({
       id: "autofill-magic",
-      title: "✨ AutoFill AI",
+      title: "⚡ Filli AI",
       contexts: ["editable", "page"]
     });
     
@@ -97,7 +98,7 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   }
 
   if (request.action === 'generate_data') {
-    handleGenerateData(request.fields, request.persona || 'default', request.customPrompt || '')
+    handleGenerateData(request.fields, request.persona || 'default', request.customPrompt || '', request.pageContext)
       .then(sendResponse)
       .catch(err => {
         console.warn("AI Generation failed:", err);
@@ -114,7 +115,7 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   }
 });
 
-async function handleGenerateData(fields: FormField[], persona: string, customPrompt: string) {
+async function handleGenerateData(fields: FormField[], persona: string, customPrompt: string, pageContext?: PageContext) {
   const settings = await chrome.storage.local.get([
     'geminiApiKey', 
     'openaiApiKey', 
@@ -142,7 +143,14 @@ async function handleGenerateData(fields: FormField[], persona: string, customPr
 
   if (!fields || fields.length === 0) return {};
 
-  console.log(`[AutoFill AI] Processing all ${fields.length} fields in a single AI call.`);
+  // Deterministic QA Edge-Case & Boundary Generator
+  // Bypasses LLM API Safety filters (OpenAI/Anthropic content filters) and guarantees exact boundary math
+  if (persona === 'qa') {
+    console.log(`[AutoFill AI] Generating deterministic QA boundary test data for ${fields.length} fields.`);
+    return QAGenerator.generateQAData(fields);
+  }
+
+  console.log(`[AutoFill AI] Processing all ${fields.length} fields in a single AI call. Page domain: ${pageContext?.domain || 'unknown'}`);
 
   let personaContext = "";
   if (persona === 'default') {
@@ -167,7 +175,7 @@ async function handleGenerateData(fields: FormField[], persona: string, customPr
   }
 
   try {
-    const prompt = getPromptForPersona(persona, customPrompt, fields, settings, personaContext);
+    const prompt = getPromptForPersona(persona, customPrompt, fields, settings, personaContext, pageContext);
     
     // Send a single completion request for all fields
     const rawResult = await generateAICompletion(prompt, settings, true, fields);
@@ -278,7 +286,7 @@ function detectCountryDetails(phoneNumber?: string) {
   return defaults;
 }
 
-function getPromptForPersona(persona: string, customPrompt: string, fields: FormField[], settings?: Record<string, string | number | boolean | undefined>, personaContext?: string) {
+function getPromptForPersona(persona: string, customPrompt: string, fields: FormField[], settings?: Record<string, string | number | boolean | undefined>, personaContext?: string, pageContext?: PageContext) {
   const fieldList = fields.map(f => {
     let desc = `${f.id} (${f.label || f.placeholder || f.name}`;
     if (f.options && f.options.length > 0) {
@@ -324,6 +332,20 @@ CRITICAL RULES FOR PROFILE FILLING:
 1. For name, email, phone, company, and title, ALWAYS use the exact profile details provided above if the form field asks for them. Do not invent mock names or dummy emails.
 2. If there are other standard fields (like country, address, etc.) or complex text fields (like "comments", "feedback", "interests") that are not explicitly provided in the profile list above, dynamically generate highly coherent, professional, and matching values that align naturally with the user's Job Title, Custom Background/Bio context, and country localization.
 3. Make sure all generated text flows naturally and feels human-written.\n\n`;
+  }
+
+  if (pageContext) {
+    let contextBlock = `SURROUNDING PAGE & FORM CONTEXT:\n`;
+    if (pageContext.domain) contextBlock += `- Page Domain: ${pageContext.domain}\n`;
+    if (pageContext.title) contextBlock += `- Page Title: ${pageContext.title}\n`;
+    if (pageContext.formHeading) contextBlock += `- Form Section Title: ${pageContext.formHeading}\n`;
+    if (pageContext.headings && pageContext.headings.length > 0) {
+      contextBlock += `- Page Headings: ${pageContext.headings.join(' | ')}\n`;
+    }
+    if (pageContext.description) contextBlock += `- Page Summary: ${pageContext.description}\n`;
+    contextBlock += `CONTEXTUAL FILLING DIRECTIVE: Use this page context to infer the exact domain/use-case (e.g. shipping address vs medical intake vs job application vs hotel reservation vs SaaS feedback). Ambiguous fields (like "Notes", "Special instructions", "Reason", "Title", "Comments") MUST be generated to fit this exact context.\n\n`;
+    
+    instructions = contextBlock + instructions;
   }
 
   if (personaContext) {

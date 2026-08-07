@@ -65,7 +65,7 @@ export const OnboardingWizard = ({
           </Badge>
           <h2 className="text-3xl font-black tracking-tight text-slate-900 justify-center flex items-center gap-3">
             <Logo size={28} />
-            How AutoFill Works
+            How Filli AI Works
           </h2>
           <p className="text-slate-500 text-sm font-medium">
             When you visit any page with a form, a floating side dock will appear. Click on the preview buttons below to see how each persona behaves:
@@ -82,7 +82,7 @@ export const OnboardingWizard = ({
               <div className="flex justify-between items-center pb-2.5 border-b border-slate-100">
                 <div className="flex items-center gap-1.5 font-black text-slate-800 text-xs">
                   <Logo size={14} />
-                  <span>AutoFill AI</span>
+                  <span>Filli AI</span>
                 </div>
                 <span className="text-[9px] bg-indigo-50 text-indigo-600 font-bold px-1.5 py-0.5 rounded">3 fields found</span>
               </div>

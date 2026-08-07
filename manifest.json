@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "AutoFill AI",
+  "name": "Filli AI – QA Edge-Case & Form Test Data Filler",
   "version": "1.0.0",
-  "description": "Form filling with context-aware AI.",
+  "description": "Instant QA edge-case, boundary & context-aware AI test data form filler for developers.",
   "permissions": ["storage", "activeTab", "scripting", "contextMenus", "webNavigation"],
   "host_permissions": [
     "https://autofill-ai-proxy.vinaykondabattula.workers.dev/"

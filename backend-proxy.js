@@ -1,5 +1,5 @@
 /**
- * AutoFill AI Cloud Proxy with Supabase JWT Auth & KV Usage Tracking
+ * Filli AI Cloud Proxy with Supabase JWT Auth & KV Usage Tracking
  * 
  * Modular worker architecture:
  * - Rate Limiter: ./src/proxy/rateLimiter.js
@@ -456,7 +456,7 @@ export default {
         const timeoutId = setTimeout(() => controller.abort(), 25000); // 25s timeout for large forms
 
         try {
-          console.log(`[AutoFill AI Proxy] Attempting completion with model: ${modelName}`);
+          console.log(`[Filli AI Proxy] Attempting completion with model: ${modelName}`);
           const res = await fetch(API_URL, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -483,7 +483,7 @@ export default {
           } else {
             const errText = await res.text();
             const sanitizedErr = errText.slice(0, 200).replace(/[\r\n]+/g, ' ');
-            console.warn(`[AutoFill AI Proxy] Model ${modelName} returned status ${res.status}: ${sanitizedErr}. Attempting failover cascade...`);
+            console.warn(`[Filli AI Proxy] Model ${modelName} returned status ${res.status}: ${sanitizedErr}. Attempting failover cascade...`);
             
             let cleanErr = errText;
             try {
@@ -500,26 +500,26 @@ export default {
             // Only retry if it is a transient server error (500, 502, 503, 504) or rate limit (429)
             const shouldRetry = res.status === 429 || (res.status >= 500 && res.status <= 599);
             if (!shouldRetry) {
-              console.warn(`[AutoFill AI Proxy] Static error status ${res.status} detected. Aborting cascade.`);
+              console.warn(`[Filli AI Proxy] Static error status ${res.status} detected. Aborting cascade.`);
               break; 
             }
           }
         } catch (err) {
           if (err.name === "AbortError") {
             lastError = new Error("Request timed out after 25 seconds.");
-            console.warn(`[AutoFill AI Proxy] Model ${modelName} timed out. Aborting cascade.`);
+            console.warn(`[Filli AI Proxy] Model ${modelName} timed out. Aborting cascade.`);
             break; // Abort cascade immediately on timeout
           } else {
             lastError = err;
           }
-          console.warn(`[AutoFill AI Proxy] Model ${modelName} threw error:`, err.message || err);
+          console.warn(`[Filli AI Proxy] Model ${modelName} threw error:`, err.message || err);
         } finally {
           clearTimeout(timeoutId);
         }
       }
 
       if (!response) {
-        console.error("[AutoFill AI Proxy Error] All model attempts failed:", lastError ? lastError.message : "Unknown failure");
+        console.error("[Filli AI Proxy Error] All model attempts failed:", lastError ? lastError.message : "Unknown failure");
         return new Response(JSON.stringify({ error: "AI generation service is temporarily unavailable. Please try again shortly." }), { 
           status: 502,
           headers: {
@@ -572,7 +572,7 @@ export default {
       });
 
     } catch (err) {
-      console.error("[AutoFill AI Proxy Fatal Error]:", err.message || err);
+      console.error("[Filli AI Proxy Fatal Error]:", err.message || err);
       return new Response(JSON.stringify({ error: "An unexpected server error occurred." }), {
         status: 500,
         headers: {

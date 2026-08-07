@@ -1,8 +1,8 @@
-# ✨ AutoFill AI
+# ✨ Filli AI
 
 **The smartest way to fill out the web.** 
 
-AutoFill AI is a modern browser extension that uses intelligence to help you fill out forms, surveys, and registrations instantly. Forget typing the same information over and over—let the magic do it for you.
+Filli AI is a modern browser extension that uses intelligence to help you fill out forms, surveys, and registrations instantly. Forget typing the same information over and over—let the magic do it for you.
 
 ## 🚀 Key Features
 

@@ -466,7 +466,7 @@ export const Popup = () => {
                 <Logo size={28} />
               </div>
               <div>
-                <h1 className="text-xl font-black text-slate-900 tracking-tight leading-none">AutoFill AI</h1>
+                <h1 className="text-xl font-black text-slate-900 tracking-tight leading-none">Filli AI</h1>
                 <p className="text-[10px] font-bold text-slate-400 mt-1 flex items-center gap-1 uppercase tracking-widest">
                   <span className={`w-1.5 h-1.5 rounded-full ${formFields > 0 ? 'bg-emerald-500 animate-ping' : 'bg-slate-300'}`} />
                   {formFields > 0 ? `${formFields} Elements Detected` : 'No Forms Detected'}
@@ -686,7 +686,7 @@ export const Popup = () => {
             >
               {/* Button Layer - Dynamic Gradients */}
               {formFields > 0 && (
-                <div className={`absolute inset-0 pointer-events-none ${limitReached ? 'bg-gradient-to-r from-rose-500 to-orange-600' : 'bg-gradient-to-r from-indigo-600 to-violet-700'}`} />
+                <div className={`absolute inset-0 pointer-events-none ${limitReached ? 'bg-gradient-to-r from-rose-500 to-orange-600' : persona === 'qa' ? 'bg-gradient-to-r from-amber-500 to-orange-600' : 'bg-gradient-to-r from-indigo-600 to-violet-700'}`} />
               )}
               {formFields === 0 && (
                 <div className="absolute inset-0 pointer-events-none bg-slate-200" />
