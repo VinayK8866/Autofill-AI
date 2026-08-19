@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Filli AI – QA Edge-Case & Form Test Data Filler",
+  "name": "Filli AI - AI Form Filler & QA Test Data",
   "version": "1.0.0",
   "description": "Instant QA edge-case, boundary & context-aware AI test data form filler for developers.",
   "permissions": ["storage", "activeTab", "scripting", "contextMenus", "webNavigation"],
