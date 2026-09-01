@@ -54,7 +54,8 @@ export const Options = () => {
     customerPortalUrl, setCustomerPortalUrl,
     checkoutUrl,
     authError, setAuthError,
-    authLoading, setAuthLoading
+    authLoading, setAuthLoading,
+    handleAuthUrlOrParams
   } = useOptionsState();
 
   const testConnection = (providerId: string, apiKey: string, customUrl?: string) => {
@@ -199,38 +200,55 @@ export const Options = () => {
   const handleGoogleSignIn = async () => {
     setAuthError('');
     setAuthLoading(true);
-    const originalConsoleError = console.error;
-    console.error = (...args) => {
-      const isFetchError = args.some(arg =>
-        (arg instanceof Error && (arg.message === 'Failed to fetch' || arg.message.toLowerCase().includes('failed to fetch'))) ||
-        (typeof arg === 'string' && arg.toLowerCase().includes('failed to fetch'))
-      );
-      if (isFetchError) {
-        const cleanArgs = args.map(arg => {
-          if (arg instanceof Error) return `${arg.name}: ${arg.message}`;
-          return String(arg);
-        });
-        console.log('Supabase fetch failed silently (intercepted console.error to keep extensions dashboard clean):', ...cleanArgs);
-        return;
-      }
-      originalConsoleError.apply(console, args);
-    };
 
     try {
-      const redirectToUrl = chrome.runtime.getURL('options.html');
-      const { error } = await supabase.auth.signInWithOAuth({
+      const isIdentityAvailable = typeof chrome !== 'undefined' && !!chrome.identity?.launchWebAuthFlow;
+      const redirectUrl = isIdentityAvailable && chrome.identity?.getRedirectURL
+        ? chrome.identity.getRedirectURL()
+        : (typeof chrome !== 'undefined' && chrome.runtime?.getURL ? chrome.runtime.getURL('options.html') : (typeof window !== 'undefined' ? window.location.href : ''));
+
+      console.log('[Filli AI Auth] Initiating Google Sign-In with redirectUrl:', redirectUrl);
+
+      const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: redirectToUrl
+          redirectTo: redirectUrl,
+          skipBrowserRedirect: isIdentityAvailable
         }
       });
+
       if (error) {
-        let message = error.message;
-        if (message === 'Failed to fetch' || message.toLowerCase().includes('failed to fetch')) {
-          message = 'Could not connect to the authentication server. Please check your internet connection or verify if the Supabase project configuration is active.';
-        }
-        setAuthError(message);
-        setAuthLoading(false);
+        throw error;
+      }
+
+      if (isIdentityAvailable && data?.url) {
+        chrome.identity.launchWebAuthFlow(
+          {
+            url: data.url,
+            interactive: true
+          },
+          async (callbackUrl) => {
+            if (chrome.runtime.lastError) {
+              const errMsg = chrome.runtime.lastError.message || 'Google sign-in was cancelled.';
+              console.warn('[Filli AI Auth] launchWebAuthFlow response error:', errMsg);
+              if (!errMsg.toLowerCase().includes('user cancelled') && !errMsg.toLowerCase().includes('canceled')) {
+                setAuthError(errMsg);
+              }
+              setAuthLoading(false);
+              return;
+            }
+
+            if (!callbackUrl) {
+              setAuthLoading(false);
+              return;
+            }
+
+            console.log('[Filli AI Auth] Callback received successfully:', callbackUrl);
+            await handleAuthUrlOrParams(callbackUrl);
+          }
+        );
+      } else if (data?.url) {
+        window.location.href = data.url;
       }
     } catch (err: unknown) {
       let message = err instanceof Error ? err.message : 'Google sign-in failed.';
@@ -239,8 +257,6 @@ export const Options = () => {
       }
       setAuthError(message);
       setAuthLoading(false);
-    } finally {
-      console.error = originalConsoleError;
     }
   };
 

@@ -1,11 +1,12 @@
 {
   "name": "dummydatafiller",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.2",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "package": "npm run build && rm -f dist.zip && cd dist && zip -r ../dist.zip . && cd ..",
     "lint": "eslint .",
     "preview": "vite preview"
   },

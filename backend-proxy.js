@@ -31,8 +31,10 @@ export default {
       ? env.ALLOWED_EXTENSION_ID.split(",").map(id => id.trim())
       : [];
 
-    const isAllowed = allowedExtensionIds.includes(origin) || (origin && origin.endsWith("vinaykondabattula.workers.dev"));
-    const allowedOrigin = isAllowed ? origin : "null";
+    const isAllowed = allowedExtensionIds.includes(origin) || 
+      (origin && origin.startsWith("chrome-extension://")) || 
+      (origin && origin.endsWith("vinaykondabattula.workers.dev"));
+    const allowedOrigin = isAllowed ? origin : "*";
 
     const url = new URL(request.url);
     const isPostHogRequest = url.pathname.startsWith("/posthog/");

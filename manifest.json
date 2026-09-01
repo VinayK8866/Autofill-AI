@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Filli AI - AI Form Filler & QA Test Data",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "Instant QA edge-case, boundary & context-aware AI test data form filler for developers.",
-  "permissions": ["storage", "activeTab", "scripting", "contextMenus", "webNavigation"],
+  "permissions": ["storage", "activeTab", "scripting", "contextMenus", "identity"],
   "host_permissions": [
     "https://autofill-ai-proxy.vinaykondabattula.workers.dev/"
   ],
@@ -41,8 +41,8 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["options.html"],
-      "matches": ["https://uipnnsbbdsgchgphvliw.supabase.co/*"]
+      "resources": ["options.html", "public/*"],
+      "matches": ["<all_urls>"]
     }
   ]
 }

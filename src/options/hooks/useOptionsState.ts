@@ -74,114 +74,172 @@ export function useOptionsState() {
     setTimeout(() => setShowToast(false), 3000);
   };
 
-  useEffect(() => {
-    // Check if opened with session callback in URL hash (from Supabase email confirmation link)
-    if (typeof window !== 'undefined' && window.location.hash) {
-      const hash = window.location.hash.substring(1);
-      const params = new URLSearchParams(hash);
-      const accessToken = params.get('access_token');
-      const errorDescription = params.get('error_description');
+  const processAuthUser = async (accessToken: string, user: any, showToastNotification = true) => {
+    const avatar = user.user_metadata?.avatar_url || '';
+    const fullName = user.user_metadata?.full_name || '';
+    const cloudUrl = ENV.CLOUD_PROXY_URL;
+    let plan = 'Free Tier';
+    let usage = 0;
+    let portalUrl = '';
 
-      if (errorDescription) {
-        triggerToast(decodeURIComponent(errorDescription), 'error');
+    try {
+      const res = await fetch(`${cloudUrl}/usage`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data) {
+          plan = data.userPlan || 'Free Tier';
+          usage = data.usageCount || 0;
+          portalUrl = data.customerPortalUrl || '';
+        }
+      }
+    } catch (err) {
+      console.log('Error fetching usage on auth callback:', err);
+    }
+
+    return new Promise<void>((resolve) => {
+      chrome.storage.local.get(['profileFirstName', 'profileLastName', 'profileEmail'], (res) => {
+        const parts = fullName.trim().split(/\s+/);
+        const metaFirstName = parts[0] || '';
+        const metaLastName = parts.slice(1).join(' ') || '';
+        const metaEmail = user.email || '';
+
+        const updateObj: Record<string, string | number | boolean | undefined> = {
+          authToken: accessToken,
+          userEmail: user.email,
+          userPlan: plan,
+          usageCount: usage,
+          userId: user.id,
+          userName: fullName,
+          userAvatar: avatar,
+          customerPortalUrl: portalUrl
+        };
+
+        let changedProfile = false;
+        if (!res.profileFirstName && metaFirstName) {
+          updateObj.profileFirstName = metaFirstName;
+          setFirstName(metaFirstName);
+          changedProfile = true;
+        }
+        if (!res.profileLastName && metaLastName) {
+          updateObj.profileLastName = metaLastName;
+          setLastName(metaLastName);
+          changedProfile = true;
+        }
+        if (!res.profileEmail && metaEmail) {
+          updateObj.profileEmail = metaEmail;
+          setEmail(metaEmail);
+          changedProfile = true;
+        }
+
+        chrome.storage.local.set(updateObj, () => {
+          setAuthToken(accessToken);
+          setUserEmail(user.email || '');
+          setUserPlan(plan);
+          setUsageCount(usage);
+          setUserId(user.id);
+          setUserName(fullName);
+          setUserAvatar(avatar);
+          setCustomerPortalUrl(portalUrl);
+          setIsLoggedIn(true);
+          setAuthLoading(false);
+          setAuthError('');
+
+          // PostHog Telemetry Identification
+          posthog.identify(user.id);
+          posthog.people.set({
+            email: user.email,
+            name: fullName,
+            plan: plan
+          });
+          posthog.capture('user_login_success', { method: 'oauth_google' });
+
+          setActiveTab('account');
+          if (showToastNotification) {
+            triggerToast(changedProfile ? 'Signed in successfully! Profile details imported from Google.' : 'Signed in successfully!');
+          }
+          if (typeof window !== 'undefined' && (window.location.search || window.location.hash)) {
+            window.history.replaceState(null, '', window.location.pathname);
+          }
+          resolve();
+        });
+      });
+    });
+  };
+
+  const handleAuthUrlOrParams = async (urlOrParams: string): Promise<boolean> => {
+    try {
+      let code: string | null = null;
+      let accessToken: string | null = null;
+      let errorDesc: string | null = null;
+
+      if (urlOrParams.includes('?') || urlOrParams.includes('#')) {
+        const parsedUrl = new URL(urlOrParams.startsWith('http') ? urlOrParams : `https://filliai.local/${urlOrParams.replace(/^\?/, '')}`);
+        code = parsedUrl.searchParams.get('code');
+        errorDesc = parsedUrl.searchParams.get('error_description') || parsedUrl.searchParams.get('error');
+
+        if (!code && parsedUrl.hash) {
+          const hashParams = new URLSearchParams(parsedUrl.hash.replace(/^#/, ''));
+          accessToken = hashParams.get('access_token');
+          if (!errorDesc) errorDesc = hashParams.get('error_description');
+        }
+      }
+
+      if (errorDesc) {
+        const decoded = decodeURIComponent(errorDesc);
+        triggerToast(decoded, 'error');
+        setAuthError(decoded);
+        setAuthLoading(false);
+        return false;
+      }
+
+      if (code) {
+        setAuthLoading(true);
+        const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+        if (error) {
+          triggerToast(error.message || 'Authentication exchange failed.', 'error');
+          setAuthError(error.message);
+          setAuthLoading(false);
+          return false;
+        }
+        if (data.session) {
+          await processAuthUser(data.session.access_token, data.session.user);
+          return true;
+        }
       } else if (accessToken) {
         setAuthLoading(true);
-        supabase.auth.getUser(accessToken).then(({ data: userData, error: userError }) => {
-          if (userError || !userData.user) {
-            triggerToast(userError?.message || 'Failed to retrieve user profile.', 'error');
-            setAuthLoading(false);
-            return;
-          }
+        const { data: userData, error: userError } = await supabase.auth.getUser(accessToken);
+        if (userError || !userData.user) {
+          const msg = userError?.message || 'Failed to retrieve user profile.';
+          triggerToast(msg, 'error');
+          setAuthError(msg);
+          setAuthLoading(false);
+          return false;
+        }
+        await processAuthUser(accessToken, userData.user);
+        return true;
+      }
+      return false;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Authentication failed.';
+      triggerToast(msg, 'error');
+      setAuthError(msg);
+      setAuthLoading(false);
+      return false;
+    }
+  };
 
-          const user = userData.user;
-          const avatar = user.user_metadata?.avatar_url || '';
-          const fullName = user.user_metadata?.full_name || '';
-          const cloudUrl = ENV.CLOUD_PROXY_URL;
-          let plan = 'Free Tier';
-          let usage = 0;
-          let portalUrl = '';
-
-          fetch(`${cloudUrl}/usage`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${accessToken}`
-            }
-          })
-            .then(res => res.ok ? res.json() : null)
-            .then(data => {
-              if (data) {
-                plan = data.userPlan || 'Free Tier';
-                usage = data.usageCount || 0;
-                portalUrl = data.customerPortalUrl || '';
-              }
-            })
-            .catch(err => {
-              console.log('Error fetching usage on redirect:', err);
-            })
-            .finally(() => {
-              chrome.storage.local.get(['profileFirstName', 'profileLastName', 'profileEmail'], (res) => {
-                const parts = fullName.trim().split(/\s+/);
-                const metaFirstName = parts[0] || '';
-                const metaLastName = parts.slice(1).join(' ') || '';
-                const metaEmail = user.email || '';
-
-                const updateObj: Record<string, string | number | boolean | undefined> = {
-                  authToken: accessToken,
-                  userEmail: user.email,
-                  userPlan: plan,
-                  usageCount: usage,
-                  userId: user.id,
-                  userName: fullName,
-                  userAvatar: avatar,
-                  customerPortalUrl: portalUrl
-                };
-
-                let changedProfile = false;
-                if (!res.profileFirstName) {
-                  updateObj.profileFirstName = metaFirstName;
-                  setFirstName(metaFirstName);
-                  changedProfile = true;
-                }
-                if (!res.profileLastName) {
-                  updateObj.profileLastName = metaLastName;
-                  setLastName(metaLastName);
-                  changedProfile = true;
-                }
-                if (!res.profileEmail) {
-                  updateObj.profileEmail = metaEmail;
-                  setEmail(metaEmail);
-                  changedProfile = true;
-                }
-
-                chrome.storage.local.set(updateObj, () => {
-                  setAuthToken(accessToken);
-                  setUserEmail(user.email || '');
-                  setUserPlan(plan);
-                  setUsageCount(usage);
-                  setUserId(user.id);
-                  setUserName(fullName);
-                  setUserAvatar(avatar);
-                  setCustomerPortalUrl(portalUrl);
-                  setIsLoggedIn(true);
-                  setAuthLoading(false);
-
-                  // PostHog Telemetry Identification
-                  posthog.identify(user.id);
-                  posthog.people.set({
-                    email: user.email,
-                    name: fullName,
-                    plan: plan
-                  });
-                  posthog.capture('user_login_success', { method: 'oauth_google' });
-
-                  setActiveTab('account');
-                  triggerToast(changedProfile ? 'Signed in successfully! Profile details imported from Google.' : 'Signed in successfully!');
-                  window.history.replaceState(null, '', window.location.pathname);
-                });
-              });
-            });
-        });
+  useEffect(() => {
+    // Check if opened with session callback in URL search (PKCE code) or hash (tokens)
+    if (typeof window !== 'undefined' && (window.location.search || window.location.hash)) {
+      const currentUrl = window.location.href;
+      if (currentUrl.includes('code=') || currentUrl.includes('access_token=') || currentUrl.includes('error=')) {
+        handleAuthUrlOrParams(currentUrl);
       }
     }
 
@@ -462,6 +520,7 @@ export function useOptionsState() {
     customerPortalUrl, setCustomerPortalUrl,
     checkoutUrl, setCheckoutUrl,
     authError, setAuthError,
-    authLoading, setAuthLoading
+    authLoading, setAuthLoading,
+    handleAuthUrlOrParams
   };
 }
