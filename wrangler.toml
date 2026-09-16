@@ -4,10 +4,16 @@ compatibility_date = "2024-03-01"
 
 # Environment Variables configured via Wrangler Secrets:
 # Run: npx wrangler secret put GEMINI_API_KEY
-# Run: npx wrangler secret put SUPABASE_URL
-# Run: npx wrangler secret put SUPABASE_ANON_KEY
-# Run: npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+# Run: npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY # Optional: for Supabase DB profile upsert
 # Run: npx wrangler secret put LEMON_SQUEEZY_WEBHOOK_SECRET
+# Run: npx wrangler secret put PADDLE_API_KEY
+# Run: npx wrangler secret put PADDLE_WEBHOOK_SECRET
+# Run: npx wrangler secret put PADDLE_PRO_PRICE_ID
+# Run: npx wrangler secret put PADDLE_ENVIRONMENT # Optional: "production" (default) or "sandbox"
+
+[vars]
+SUPABASE_URL = "https://uipnnsbbdsgchgphvliw.supabase.co"
+SUPABASE_ANON_KEY = "sb_publishable_aC1l5VraOSWjYSPFfBqHCA_5uyBRfy0"
 
 [[kv_namespaces]]
 binding = "USERS_KV"

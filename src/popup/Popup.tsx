@@ -1,8 +1,23 @@
 import { useState, useEffect } from 'react';
-import { Settings, Sparkles, History, Cpu, Globe, Rocket, AlertCircle, LockKeyhole, User } from 'lucide-react';
+import { 
+  Settings, Sparkles, History, Cpu, Rocket, AlertCircle, LockKeyhole, 
+  User, Star, X, Building2, ShieldCheck, Download, Copy, Check, Globe, FileText 
+} from 'lucide-react';
 import { posthog } from '@/lib/posthog';
 import { Logo } from '@/components/Logo';
-import { ENV } from '@/config/env';
+import { type SavedProfile, loadSavedProfiles, syncActiveProfileToStorage } from '@/lib/profileManager';
+import { getDomainPrompt, saveDomainPrompt, deleteDomainPrompt, normalizeDomain } from '@/lib/domainPromptManager';
+import { type QAFlavor } from '@/lib/qaGenerator';
+import { 
+  type TestRunReportData, 
+  generateReportMarkdown, 
+  generateReportCSV, 
+  generateReportJSON, 
+  downloadReportFile, 
+  copyReportToClipboard 
+} from '@/lib/exportReport';
+
+const CHROME_STORE_REVIEW_URL = 'https://chromewebstore.google.com/detail/filli-ai-ai-form-filler-q/hgegjecojocbaajhpphckaphclpdkbhl/reviews';
 
 export const Popup = () => {
   const [loading, setLoading] = useState(false);
@@ -16,6 +31,10 @@ export const Popup = () => {
   const [usageCount, setUsageCount] = useState(0);
   const [userPlan, setUserPlan] = useState('Free Tier');
 
+  // Multi-Profile Vault States
+  const [savedProfiles, setSavedProfiles] = useState<SavedProfile[]>([]);
+  const [activeProfileId, setActiveProfileId] = useState<string>('');
+
   // Persona and Custom Instruction States
   const [persona, setPersona] = useState<'default' | 'profile' | 'qa' | 'b2b'>('default');
   const [customPrompts, setCustomPrompts] = useState<Record<'default' | 'profile' | 'qa' | 'b2b', string>>({
@@ -26,6 +45,19 @@ export const Popup = () => {
   });
   const [showCustomPrompt, setShowCustomPrompt] = useState(false);
 
+  // Per-Domain Custom Prompt Memory States
+  const [currentDomain, setCurrentDomain] = useState<string>('');
+  const [domainPromptSaved, setDomainPromptSaved] = useState<boolean>(false);
+  const [domainSaveMsg, setDomainSaveMsg] = useState<string>('');
+
+  // QA Flavor State (Standard vs AppSec Pro)
+  const [qaFlavor, setQaFlavor] = useState<QAFlavor>('all');
+
+  // Test Run Report & Export States
+  const [lastReport, setLastReport] = useState<TestRunReportData | null>(null);
+  const [showExportModal, setShowExportModal] = useState<boolean>(false);
+  const [copiedFormat, setCopiedFormat] = useState<string>('');
+
   // Rate Limit / Onboarding States
   const [limitReached, setLimitReached] = useState(false);
   const [limitErrorMessage, setLimitErrorMessage] = useState('');
@@ -33,6 +65,12 @@ export const Popup = () => {
 
   // Interface Configuration States
   const [enableFloatingDock, setEnableFloatingDock] = useState(true);
+
+  // QA Daily Usage State
+  const [qaDailyCount, setQaDailyCount] = useState<number>(0);
+
+  // Review Prompt State
+  const [showReviewPrompt, setShowReviewPrompt] = useState(false);
 
   useEffect(() => {
     // Read user preferences
@@ -49,7 +87,12 @@ export const Popup = () => {
       'lastActivePersona',
       'usageCount',
       'userPlan',
-      'enableFloatingDock'
+      'enableFloatingDock',
+      'successfulFills',
+      'hasReviewed',
+      'reviewPromptDismissed',
+      'qaDailyCount',
+      'qaLastDate'
     ], (result: Record<string, string | number | boolean | undefined>) => {
       const profileExists = !!(result.profileFirstName || result.profileLastName || result.profileEmail);
       setHasProfile(profileExists);
@@ -59,6 +102,21 @@ export const Popup = () => {
       setUsageCount(result.usageCount as number || 0);
       setUserPlan(result.userPlan as string || 'Free Tier');
       setEnableFloatingDock(result.enableFloatingDock !== false);
+
+      const today = new Date().toISOString().slice(0, 10);
+      let qCount = typeof result.qaDailyCount === 'number' ? result.qaDailyCount : 0;
+      if (result.qaLastDate !== today) {
+        qCount = 0;
+        chrome.storage.local.set({ qaDailyCount: 0, qaLastDate: today });
+      }
+      setQaDailyCount(qCount);
+
+      const fills = (result.successfulFills as number) || 0;
+      const reviewed = !!result.hasReviewed;
+      const dismissed = !!result.reviewPromptDismissed;
+      if (fills >= 3 && !reviewed && !dismissed) {
+        setShowReviewPrompt(true);
+      }
 
       const usage = result.usageCount as number || 0;
       const plan = result.userPlan as string || 'Free Tier';
@@ -88,48 +146,46 @@ export const Popup = () => {
         setPersona(profileExists ? 'profile' : 'default');
       }
 
-      if (typeof result.authToken === 'string' && result.authToken) {
-        const cloudUrl = ENV.CLOUD_PROXY_URL;
-        fetch(`${cloudUrl}/usage`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${result.authToken}`
-          }
-        })
-          .then(res => {
-            if (!res.ok) throw new Error('Unauthenticated or server error');
-            return res.json();
-          })
-          .then(data => {
-            if (data.userPlan) {
-              setUserPlan(data.userPlan);
-              chrome.storage.local.set({ userPlan: data.userPlan });
-            }
-            if (typeof data.usageCount === 'number') {
-              const currentUsage = data.usageCount;
-              const currentPlan = data.userPlan || plan;
-              setUsageCount(currentUsage);
-              chrome.storage.local.set({ usageCount: currentUsage });
+      if (currentProvider === 'cloud') {
+        chrome.runtime.sendMessage({ action: 'sync_usage' }, (res) => {
+          if (chrome.runtime.lastError || !res?.success) return;
+          if (typeof res.usageCount === 'number') {
+            const currentUsage = res.usageCount;
+            const currentPlan = res.userPlan || plan;
+            setUsageCount(currentUsage);
+            if (res.userPlan) setUserPlan(res.userPlan);
 
-              if (currentProvider === 'cloud' && !token) {
-                if (currentUsage >= 10) {
-                  setLimitReached(true);
-                  setLimitErrorMessage('Anonymous fill limit reached (10/10). Sign up inside Settings to get 50 free fills!');
-                } else {
-                  setLimitReached(false);
-                }
-              } else if (currentPlan === 'Free Tier' && currentUsage >= 50 && currentProvider === 'cloud') {
+            if (!token) {
+              if (currentUsage >= 10) {
                 setLimitReached(true);
-                setLimitErrorMessage('Monthly fill limit reached (50/50). Upgrade to Pro inside Settings!');
+                setLimitErrorMessage('Anonymous fill limit reached (10/10). Sign up inside Settings to get 50 free fills!');
               } else {
                 setLimitReached(false);
               }
+            } else if (currentPlan === 'Free Tier' && currentUsage >= 50) {
+              setLimitReached(true);
+              setLimitErrorMessage('Monthly fill limit reached (50/50). Upgrade to Pro inside Settings!');
+            } else {
+              setLimitReached(false);
             }
-          })
-          .catch(err => {
-            console.log('Could not sync usage on load in popup:', err);
-          });
+          }
+        });
+      }
+    });
+
+    // Load saved profiles for Multi-Profile Vault
+    loadSavedProfiles().then(({ profiles, activeId }) => {
+      setSavedProfiles(profiles);
+      setActiveProfileId(activeId);
+    });
+
+    // Load last test run and saved QA flavor
+    chrome.storage.local.get(['lastTestRun', 'lastQaFlavor'], (res) => {
+      if (res.lastTestRun) {
+        setLastReport(res.lastTestRun as TestRunReportData);
+      }
+      if (res.lastQaFlavor) {
+        setQaFlavor(res.lastQaFlavor as QAFlavor);
       }
     });
 
@@ -145,6 +201,15 @@ export const Popup = () => {
         setUserPlan(currentPlan);
         setAuthToken(currentToken);
         setAiProvider(currentProvider);
+
+        const today = new Date().toISOString().slice(0, 10);
+        chrome.storage.local.get(['qaDailyCount', 'qaLastDate'], (qRes) => {
+          let qCount = typeof qRes.qaDailyCount === 'number' ? qRes.qaDailyCount : 0;
+          if (qRes.qaLastDate !== today) {
+            qCount = 0;
+          }
+          setQaDailyCount(qCount);
+        });
 
         if (currentProvider === 'cloud' && !currentToken) {
           if (currentUsage >= 10) {
@@ -163,6 +228,17 @@ export const Popup = () => {
 
       if (changes.enableFloatingDock) {
         setEnableFloatingDock(changes.enableFloatingDock.newValue !== false);
+      }
+
+      if (changes.savedProfiles || changes.activeProfileId) {
+        loadSavedProfiles().then(({ profiles, activeId }) => {
+          setSavedProfiles(profiles);
+          setActiveProfileId(activeId);
+        });
+      }
+
+      if (changes.lastTestRun) {
+        setLastReport(changes.lastTestRun.newValue as TestRunReportData);
       }
     };
     chrome.storage.onChanged.addListener(handleStorageChange);
@@ -184,6 +260,23 @@ export const Popup = () => {
     const detectFields = async () => {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       if (tab?.id && tab.url?.startsWith('http')) {
+        // Detect domain for Per-Domain Custom Prompt Memory
+        const domain = normalizeDomain(tab.url);
+        setCurrentDomain(domain);
+        if (domain) {
+          getDomainPrompt(domain).then((savedPrompt) => {
+            if (savedPrompt) {
+              setCustomPrompts(prev => ({
+                ...prev,
+                default: prev.default || savedPrompt,
+                qa: prev.qa || savedPrompt,
+                b2b: prev.b2b || savedPrompt
+              }));
+              setDomainPromptSaved(true);
+            }
+          });
+        }
+
         // Exclude search engines
         const isSearchEngine = (url: string) => {
           try {
@@ -236,14 +329,55 @@ export const Popup = () => {
   }, []);
 
   const changePersona = (newPersona: 'default' | 'profile' | 'qa' | 'b2b') => {
-    if ((newPersona === 'qa' || newPersona === 'b2b') && userPlan !== 'Pro Plan') {
-      setErrorMessage("The QA Test and B2B Corp personas require a paid Pro Plan SaaS subscription.");
-      setLimitReached(true);
-      setLimitErrorMessage("The QA Test and B2B Corp personas require a paid Pro Plan SaaS subscription.");
+    setPersona(newPersona);
+    setErrorMessage('');
+    chrome.storage.local.set({ lastActivePersona: newPersona });
+  };
+
+  const handleSwitchProfile = (id: string) => {
+    const target = savedProfiles.find(p => p.id === id);
+    if (!target) return;
+    setActiveProfileId(id);
+    syncActiveProfileToStorage(target);
+    setHasProfile(!!(target.firstName || target.lastName || target.email));
+  };
+
+  const handleSaveDomainPrompt = async () => {
+    if (!currentDomain) return;
+    const promptToSave = customPrompts[persona] || '';
+    if (!promptToSave.trim()) {
+      setDomainSaveMsg('Type a custom prompt first.');
       return;
     }
-    setPersona(newPersona);
-    chrome.storage.local.set({ lastActivePersona: newPersona });
+    const isBypass = userPlan === 'Pro Plan' || aiProvider !== 'cloud';
+    const result = await saveDomainPrompt(currentDomain, promptToSave, userPlan, isBypass);
+    if (result.success) {
+      setDomainPromptSaved(true);
+      setDomainSaveMsg(`Saved rule for ${currentDomain}!`);
+      setTimeout(() => setDomainSaveMsg(''), 3000);
+    } else {
+      setDomainSaveMsg(result.error || 'Failed to save rule');
+    }
+  };
+
+  const handleRemoveDomainPrompt = async () => {
+    if (!currentDomain) return;
+    await deleteDomainPrompt(currentDomain);
+    setDomainPromptSaved(false);
+    setDomainSaveMsg(`Rule cleared for ${currentDomain}`);
+    setTimeout(() => setDomainSaveMsg(''), 3000);
+  };
+
+  const handleQaFlavorChange = (flavor: QAFlavor) => {
+    const isBypass = userPlan === 'Pro Plan' || aiProvider !== 'cloud';
+    if (flavor === 'appsec_pro' && !isBypass && userPlan !== 'Pro Plan') {
+      setErrorMessage("OWASP AppSec Pentest Suite requires a Pro Plan or personal API key (BYOK).");
+      setLimitReached(true);
+      setLimitErrorMessage("OWASP AppSec Pentest Suite requires a Pro Plan or personal API key (BYOK).");
+      return;
+    }
+    setQaFlavor(flavor);
+    chrome.storage.local.set({ lastQaFlavor: flavor });
   };
 
   const changeCustomPrompt = (newPrompt: string) => {
@@ -262,8 +396,19 @@ export const Popup = () => {
   const handleFill = async () => {
     if (formFields === 0) return;
 
-    // If we've hit the limit, clicking the button redirects to the settings tab to log in/upgrade
-    if (limitReached) {
+    const isBypass = userPlan === 'Pro Plan' || aiProvider !== 'cloud';
+    const isQaLimitReached = !isBypass && persona === 'qa' && qaDailyCount >= 5;
+
+    // If QA daily limit is reached for free cloud users, redirect to settings
+    if (isQaLimitReached) {
+      chrome.storage.local.set({ activeTabOnOpen: 'account' }, () => {
+        chrome.runtime.openOptionsPage();
+      });
+      return;
+    }
+
+    // If cloud monthly/anonymous fill limit is reached, redirect to settings
+    if (limitReached && persona !== 'qa') {
       chrome.storage.local.set({ activeTabOnOpen: 'account' }, () => {
         chrome.runtime.openOptionsPage();
       });
@@ -290,7 +435,8 @@ export const Popup = () => {
             action: 'broadcast_fill',
             tabId: tab.id,
             persona: persona,
-            customPrompt: customPrompts[persona] || ''
+            customPrompt: customPrompts[persona] || '',
+            qaFlavor: qaFlavor
           }, (res) => {
             if (chrome.runtime.lastError) {
               resolve({ error: chrome.runtime.lastError.message });
@@ -323,7 +469,35 @@ export const Popup = () => {
           posthog.capture('form_filled_success', {
             fieldsCount: formFields,
             persona: persona,
-            aiProvider: aiProvider
+            aiProvider: aiProvider,
+            qaFlavor: persona === 'qa' ? qaFlavor : undefined
+          });
+
+          // Reload last test run report after short delay for injection to settle
+          setTimeout(() => {
+            chrome.storage.local.get(['lastTestRun'], (res) => {
+              if (res.lastTestRun) {
+                setLastReport(res.lastTestRun as TestRunReportData);
+              }
+            });
+          }, 600);
+
+          // If QA persona on free tier, track and increment daily count
+          const isBypass = userPlan === 'Pro Plan' || aiProvider !== 'cloud';
+          if (persona === 'qa' && !isBypass) {
+            const today = new Date().toISOString().slice(0, 10);
+            const nextCount = qaDailyCount + 1;
+            setQaDailyCount(nextCount);
+            chrome.storage.local.set({ qaDailyCount: nextCount, qaLastDate: today });
+          }
+
+          // Track successful fills and trigger review prompt when >= 3
+          chrome.storage.local.get(['successfulFills', 'hasReviewed', 'reviewPromptDismissed'], (res) => {
+            const currentFills = ((res.successfulFills as number) || 0) + 1;
+            chrome.storage.local.set({ successfulFills: currentFills });
+            if (currentFills >= 3 && !res.hasReviewed && !res.reviewPromptDismissed) {
+              setShowReviewPrompt(true);
+            }
           });
         }
       } else {
@@ -347,6 +521,19 @@ export const Popup = () => {
         setLoading(false);
       }, resetDelay);
     }
+  };
+
+  const handleOpenReview = () => {
+    chrome.storage.local.set({ hasReviewed: true });
+    setShowReviewPrompt(false);
+    posthog.capture('review_prompt_clicked');
+    chrome.tabs.create({ url: CHROME_STORE_REVIEW_URL });
+  };
+
+  const handleDismissReview = () => {
+    chrome.storage.local.set({ reviewPromptDismissed: true });
+    setShowReviewPrompt(false);
+    posthog.capture('review_prompt_dismissed');
   };
 
   const getFriendlyErrorMessage = (rawError: string) => {
@@ -387,31 +574,38 @@ export const Popup = () => {
     if (authToken) {
       if (userPlan === 'Pro Plan') {
         return {
-          label: 'Autofill AI (Pro)',
-          icon: <Globe className="w-3.5 h-3.5" />,
+          label: 'Filli AI (Pro)',
+          icon: <Logo size={14} className="rounded-[3px]" />,
           desc: 'Unlimited fills'
         };
       }
       return {
-        label: 'Autofill AI (Free)',
-        icon: <Globe className="w-3.5 h-3.5" />,
+        label: 'Filli AI (Free)',
+        icon: <Logo size={14} className="rounded-[3px]" />,
         desc: `${Math.max(0, 50 - usageCount)}/50 left`
       };
     }
     return {
-      label: 'Autofill AI (Anon)',
-      icon: <Globe className="w-3.5 h-3.5" />,
+      label: 'Filli AI (Anon)',
+      icon: <Logo size={14} className="rounded-[3px]" />,
       desc: `${Math.max(0, 10 - usageCount)}/10 left`
     };
   };
 
   const mode = getModeDetails();
 
+  const isBypass = userPlan === 'Pro Plan' || aiProvider !== 'cloud';
+  const qaRemaining = isBypass ? 999 : Math.max(0, 5 - qaDailyCount);
+  const isQaLimitReached = !isBypass && persona === 'qa' && qaRemaining <= 0;
+
   // Determine dynamic action CTA text and icons based on state
   const getButtonText = () => {
     if (formFields === 0) return "No Forms Detected";
     if (loading) return "Magically Filling...";
-    if (limitReached) {
+    if (isQaLimitReached) {
+      return "Daily QA Limit Reached (5/5) — Upgrade to Pro";
+    }
+    if (limitReached && persona !== 'qa') {
       if (aiProvider === 'cloud' && !authToken) {
         return "Limit Reached: Sign Up for 50 Free Fills!";
       }
@@ -421,7 +615,7 @@ export const Popup = () => {
 
     switch (persona) {
       case 'profile': return "Fill with My Profile Card";
-      case 'qa': return "Fill with QA Edge Cases";
+      case 'qa': return isBypass ? "Fill with QA Edge Cases" : `Fill with QA Edge Cases (${qaRemaining} left today)`;
       case 'b2b': return "Fill with B2B Corp Persona";
       default: return "Generate Randomly & Fill Form";
     }
@@ -434,7 +628,7 @@ export const Popup = () => {
     if (loading) {
       return <div className="w-5 h-5 border-[3px] border-white/20 border-t-white rounded-full animate-spin" />;
     }
-    if (limitReached) {
+    if (isQaLimitReached || (limitReached && persona !== 'qa')) {
       return <LockKeyhole className="w-5 h-5 text-white animate-bounce" />;
     }
 
@@ -444,7 +638,7 @@ export const Popup = () => {
       case 'qa':
         return <AlertCircle className="w-5 h-5 text-amber-300 fill-amber-300/20 group-hover:scale-125 transition-transform" />;
       case 'b2b':
-        return <Globe className="w-5 h-5 text-amber-300 fill-amber-300/20 group-hover:scale-125 transition-transform" />;
+        return <Building2 className="w-5 h-5 text-amber-300 fill-amber-300/20 group-hover:scale-125 transition-transform" />;
       default:
         return <Sparkles className="w-5 h-5 text-amber-300 fill-amber-300/20 group-hover:scale-125 transition-transform" />;
     }
@@ -567,10 +761,10 @@ export const Popup = () => {
               <span>Filling Persona</span>
               <button
                 onClick={() => {
-                  if (userPlan !== 'Pro Plan') {
-                    setErrorMessage("Custom instructions require a paid Pro Plan SaaS subscription.");
+                  if (!isBypass && userPlan !== 'Pro Plan' && aiProvider === 'cloud') {
+                    setErrorMessage("Custom instructions require a Pro Plan or personal API key (BYOK).");
                     setLimitReached(true);
-                    setLimitErrorMessage("Custom instructions require a paid Pro Plan SaaS subscription.");
+                    setLimitErrorMessage("Custom instructions require a Pro Plan or personal API key (BYOK).");
                     return;
                   }
                   setShowCustomPrompt(!showCustomPrompt);
@@ -626,6 +820,11 @@ export const Popup = () => {
               >
                 <AlertCircle className="w-3.5 h-3.5" />
                 <span>QA Test</span>
+                {!isBypass && (
+                  <span className={`text-[8.5px] px-1 py-0.2 rounded font-black ml-0.5 ${persona === 'qa' ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-700'}`}>
+                    {qaRemaining}/5
+                  </span>
+                )}
               </button>
               <button
                 onClick={() => changePersona('b2b')}
@@ -637,21 +836,109 @@ export const Popup = () => {
                     : 'bg-slate-50 border-slate-200/80 text-slate-600 hover:bg-slate-100/80 cursor-pointer'
                   }`}
               >
-                <Globe className="w-3.5 h-3.5" />
+                <Building2 className="w-3.5 h-3.5" />
                 <span>B2B Corp</span>
               </button>
             </div>
 
-            {/* Custom Instruction Input */}
+            {/* Multi-Profile Vault Selector */}
+            {persona === 'profile' && formFields > 0 && savedProfiles.length > 0 && (
+              <div className="mt-2.5 p-2 bg-slate-50/90 rounded-xl border border-slate-200/80 flex items-center justify-between text-xs animate-in fade-in duration-200">
+                <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                  <User className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider shrink-0">Profile:</span>
+                  <select
+                    value={activeProfileId}
+                    onChange={(e) => handleSwitchProfile(e.target.value)}
+                    className="text-[11px] font-bold text-slate-800 bg-transparent border-none outline-none cursor-pointer truncate max-w-[170px] hover:text-indigo-600 transition-colors"
+                  >
+                    {savedProfiles.map(p => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <button
+                  onClick={() => chrome.runtime.openOptionsPage()}
+                  className="text-[10px] font-bold text-indigo-600 hover:text-indigo-700 hover:underline shrink-0 ml-2 cursor-pointer"
+                >
+                  Manage ⚙
+                </button>
+              </div>
+            )}
+
+            {/* QA Suite Flavor Selector */}
+            {persona === 'qa' && formFields > 0 && (
+              <div className="mt-2 p-2 bg-amber-50/70 border border-amber-200/60 rounded-xl animate-in fade-in duration-200">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-[10px] font-black text-amber-800 uppercase tracking-wider flex items-center gap-1">
+                    <ShieldCheck className="w-3.5 h-3.5 text-amber-600" />
+                    QA Suite Flavor
+                  </span>
+                  {qaFlavor === 'appsec_pro' && (
+                    <span className="text-[9px] font-black text-purple-700 bg-purple-100 px-1.5 py-0.2 rounded border border-purple-200 uppercase tracking-wider">
+                      Pro / BYOK
+                    </span>
+                  )}
+                </div>
+                <select
+                  value={qaFlavor}
+                  onChange={(e) => handleQaFlavorChange(e.target.value as QAFlavor)}
+                  className="w-full text-xs font-bold text-slate-800 bg-white border border-amber-200 rounded-lg p-1.5 focus:outline-none focus:border-amber-500 cursor-pointer"
+                >
+                  <option value="all">Mixed Edge-Cases & Fuzzing (Standard)</option>
+                  <option value="realistic">Realistic SDET Clean Pass</option>
+                  <option value="boundary">Boundary Limits & MaxLength Overflow</option>
+                  <option value="security">Basic Security (XSS / SQL Injection)</option>
+                  <option value="appsec_pro">⚡ OWASP AppSec Penetration Suite (Pro)</option>
+                </select>
+              </div>
+            )}
+
+            {/* Custom Instruction Input & Per-Domain Memory */}
             {showCustomPrompt && formFields > 0 && (
               <div className="mt-2 animate-in slide-in-from-top-2 duration-200">
                 <textarea
                   value={customPrompts[persona]}
                   onChange={(e) => changeCustomPrompt(e.target.value)}
-                  placeholder="e.g. A developer from Seattle named Jane who loves coding..."
+                  placeholder={currentDomain ? `e.g. Instructions specific to ${currentDomain}...` : "e.g. A developer from Seattle named Jane who loves coding..."}
                   rows={2}
                   className="w-full text-xs rounded-xl border border-slate-200 focus:border-indigo-500 focus:outline-none p-2.5 resize-none font-sans bg-slate-50/50 backdrop-blur-md"
                 />
+                {currentDomain && (
+                  <div className="mt-1 flex items-center justify-between text-[10px]">
+                    <div className="flex items-center gap-1 text-slate-500 font-medium truncate max-w-[200px]">
+                      <Globe className="w-3 h-3 text-indigo-500 shrink-0" />
+                      <span className="truncate">{currentDomain}</span>
+                      {domainPromptSaved && (
+                        <span className="text-[9px] font-black text-emerald-600 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-100">
+                          Saved
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {domainPromptSaved ? (
+                        <button
+                          onClick={handleRemoveDomainPrompt}
+                          className="font-bold text-rose-500 hover:text-rose-700 cursor-pointer"
+                        >
+                          Forget
+                        </button>
+                      ) : (
+                        <button
+                          onClick={handleSaveDomainPrompt}
+                          className="font-bold text-indigo-600 hover:text-indigo-700 cursor-pointer flex items-center gap-0.5"
+                        >
+                          📌 Remember for site
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+                {domainSaveMsg && (
+                  <p className={`text-[9.5px] font-semibold mt-1 ${domainSaveMsg.includes('Saved') ? 'text-emerald-600' : 'text-rose-600'}`}>
+                    {domainSaveMsg}
+                  </p>
+                )}
               </div>
             )}
 
@@ -742,7 +1029,153 @@ export const Popup = () => {
                 </button>
               )}
             </div>
+
+            {/* Export Bug Report / Test Run */}
+            {lastReport && lastReport.fields.length > 0 && (
+              <div className="mt-3 p-3 bg-indigo-50/50 border border-indigo-100 rounded-2xl animate-in fade-in slide-in-from-bottom-2 duration-300">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-1.5">
+                    <FileText className="w-3.5 h-3.5 text-indigo-600" />
+                    <span className="text-[11px] font-black text-slate-800">Test Run Report</span>
+                    <span className="text-[9px] font-bold text-slate-400">({lastReport.fields.length} fields)</span>
+                  </div>
+                  <button
+                    onClick={() => setShowExportModal(!showExportModal)}
+                    className="text-[10px] font-black text-indigo-600 hover:text-indigo-700 bg-white px-2 py-0.5 rounded-lg border border-indigo-100 shadow-xs cursor-pointer"
+                  >
+                    {showExportModal ? 'Hide' : 'Export Options'}
+                  </button>
+                </div>
+
+                {showExportModal ? (
+                  <div className="flex flex-col gap-1.5 pt-1 border-t border-indigo-100/60">
+                    <button
+                      onClick={async () => {
+                        const md = generateReportMarkdown(lastReport);
+                        const success = await copyReportToClipboard(md);
+                        if (success) {
+                          setCopiedFormat('md');
+                          setTimeout(() => setCopiedFormat(''), 2500);
+                        }
+                      }}
+                      className="w-full flex items-center justify-between p-2 rounded-xl bg-white hover:bg-indigo-50/80 border border-slate-200/60 text-xs font-bold text-slate-700 transition-all cursor-pointer"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <Copy className="w-3.5 h-3.5 text-indigo-500" />
+                        Copy Markdown (GitHub / Jira)
+                      </span>
+                      {copiedFormat === 'md' ? (
+                        <span className="text-[10px] text-emerald-600 flex items-center gap-0.5">
+                          <Check className="w-3 h-3" /> Copied!
+                        </span>
+                      ) : (
+                        <span className="text-[9px] text-slate-400">Markdown</span>
+                      )}
+                    </button>
+
+                    <div className="grid grid-cols-3 gap-1">
+                      <button
+                        onClick={() => {
+                          const md = generateReportMarkdown(lastReport);
+                          downloadReportFile(md, `filli-report-${Date.now()}.md`, 'text/markdown');
+                        }}
+                        className="p-1.5 bg-white hover:bg-slate-100/80 border border-slate-200/60 rounded-xl text-[10px] font-bold text-slate-700 flex items-center justify-center gap-1 cursor-pointer"
+                      >
+                        <Download className="w-3 h-3 text-slate-500" />
+                        .MD
+                      </button>
+                      <button
+                        onClick={() => {
+                          const csv = generateReportCSV(lastReport);
+                          downloadReportFile(csv, `filli-report-${Date.now()}.csv`, 'text/csv');
+                        }}
+                        className="p-1.5 bg-white hover:bg-slate-100/80 border border-slate-200/60 rounded-xl text-[10px] font-bold text-slate-700 flex items-center justify-center gap-1 cursor-pointer"
+                      >
+                        <Download className="w-3 h-3 text-emerald-600" />
+                        .CSV
+                      </button>
+                      <button
+                        onClick={() => {
+                          const json = generateReportJSON(lastReport);
+                          downloadReportFile(json, `filli-report-${Date.now()}.json`, 'application/json');
+                        }}
+                        className="p-1.5 bg-white hover:bg-slate-100/80 border border-slate-200/60 rounded-xl text-[10px] font-bold text-slate-700 flex items-center justify-center gap-1 cursor-pointer"
+                      >
+                        <Download className="w-3 h-3 text-purple-600" />
+                        .JSON
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={async () => {
+                      const md = generateReportMarkdown(lastReport);
+                      const success = await copyReportToClipboard(md);
+                      if (success) {
+                        setCopiedFormat('md_quick');
+                        setTimeout(() => setCopiedFormat(''), 2500);
+                      }
+                    }}
+                    className="w-full py-1.5 px-2.5 bg-white/80 hover:bg-white border border-indigo-100 rounded-xl text-[11px] font-bold text-indigo-700 flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs"
+                  >
+                    {copiedFormat === 'md_quick' ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-600" />
+                        <span className="text-emerald-600">Copied to Clipboard!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5 text-indigo-600" />
+                        <span>1-Click Copy Bug Report (Markdown)</span>
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
+            )}
           </div>
+
+          {/* In-App Review Prompt */}
+          {showReviewPrompt && (
+            <div className="mx-6 mb-4 p-3.5 bg-gradient-to-br from-amber-500/10 via-indigo-500/10 to-violet-500/10 border border-amber-300/50 rounded-2xl relative shadow-sm animate-in fade-in slide-in-from-bottom-2 duration-300">
+              <button
+                onClick={handleDismissReview}
+                className="absolute top-2.5 right-2.5 text-slate-400 hover:text-slate-600 p-1 rounded-lg transition-colors cursor-pointer"
+                title="Dismiss"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+
+              <div className="flex items-center gap-1.5 mb-1">
+                <div className="flex text-amber-400">
+                  {[...Array(5)].map((_, i) => (
+                    <Star key={i} className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
+                  ))}
+                </div>
+                <span className="text-[11px] font-black text-slate-800 tracking-tight">Enjoying Filli AI?</span>
+              </div>
+
+              <p className="text-[10.5px] text-slate-600 mb-2.5 leading-snug font-medium">
+                Saved you manual typing? A quick 5-star review on the Chrome Store helps us rank and keep features free!
+              </p>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleOpenReview}
+                  className="flex-1 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold text-xs py-1.5 px-3 rounded-xl shadow-sm transition-all text-center flex items-center justify-center gap-1.5 cursor-pointer active:scale-[0.98]"
+                >
+                  <Star className="w-3.5 h-3.5 fill-white text-white" />
+                  <span>Rate on Chrome Store</span>
+                </button>
+                <button
+                  onClick={handleDismissReview}
+                  className="text-[10px] font-semibold text-slate-400 hover:text-slate-600 px-2 py-1.5 transition-colors cursor-pointer"
+                >
+                  Later
+                </button>
+              </div>
+            </div>
+          )}
 
         </div>
 
@@ -752,9 +1185,13 @@ export const Popup = () => {
             <History className="w-3.5 h-3.5 group-hover:rotate-[-45deg] transition-transform" />
             History
           </button>
-          <div className="flex items-center gap-1 text-[9px] font-black text-slate-300 uppercase tracking-widest">
-            Built for efficiency
-          </div>
+          <button
+            onClick={() => chrome.tabs.create({ url: CHROME_STORE_REVIEW_URL })}
+            className="flex items-center gap-1 text-[9px] font-black text-slate-400 hover:text-amber-500 transition-colors uppercase tracking-widest cursor-pointer"
+          >
+            <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
+            Rate 5★
+          </button>
         </div>
       </div>
     </div>

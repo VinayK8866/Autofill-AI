@@ -1,8 +1,10 @@
 {
   "manifest_version": 3,
   "name": "Filli AI - AI Form Filler & QA Test Data",
-  "version": "1.0.2",
-  "description": "Instant QA edge-case, boundary & context-aware AI test data form filler for developers.",
+  "short_name": "Filli AI",
+  "version": "1.0.3",
+  "description": "Context-aware AI form filler & QA test data generator. Fill realistic mock data, boundary edge cases & OWASP payloads in 1-click.",
+  "homepage_url": "https://filli-ai.pages.dev/",
   "permissions": ["storage", "activeTab", "scripting", "contextMenus", "identity"],
   "host_permissions": [
     "https://autofill-ai-proxy.vinaykondabattula.workers.dev/"
@@ -27,7 +29,10 @@
       "128": "public/icon-128.png"
     }
   },
-  "options_page": "options.html",
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
   "background": {
     "service_worker": "src/background/background.ts",
     "type": "module"
@@ -41,7 +46,18 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["options.html", "public/*"],
+      "resources": [
+        "options.html",
+        "public/*",
+        "Chrome Gemini nano.png",
+        "icon-16.png",
+        "icon-32.png",
+        "icon-48.png",
+        "icon-128.png",
+        "icon-512.png",
+        "favicon.svg",
+        "favicon.ico"
+      ],
       "matches": ["<all_urls>"]
     }
   ]

@@ -1,0 +1,61 @@
+# Filli AI — AI Form Filler & QA Test Data Generator
+
+> Filli AI is an AI-powered browser extension for developers, QA engineers, and software testers that automatically analyzes web forms and generates contextually accurate mock data, boundary values, and edge-case inputs in a single click.
+
+## Core Identity
+- **Product Name:** Filli AI
+- **Type:** Chrome Browser Extension (Manifest V3)
+- **Primary Website:** https://filli-ai.pages.dev/
+- **Target Audience:** Software developers, QA engineers, product managers, penetration testers, and form testers.
+- **Supported Environments:** Dynamic React, Angular, Vue, Svelte web apps, multi-step form wizards, Shadow DOM, and legacy HTML forms.
+
+## Key Capabilities
+
+### 1. Context-Aware Mock Data Generation
+Unlike traditional random fillers that output unvalidated placeholder strings like `asdf1234`, Filli AI reads input labels, surrounding DOM structure, field constraints (e.g., regex patterns, min/max limits), and data types to generate contextually coherent, realistic test data (e.g., real-looking addresses, valid phone numbers, corporate emails, localized names).
+
+### 2. QA Edge-Case & Boundary Value Testing
+Allows testers to stress-test form validation with a single click by injecting boundary inputs:
+- Extreme character length strings (overflow testing)
+- Unicode characters, emojis, and right-to-left scripts
+- Special characters and symbols (`< > & " ' \ /`)
+- Numeric boundary limits, negative values, and zero edge cases
+- Invalid formats (e.g., malformed email structures, edge-case leap year dates)
+
+### 3. AppSec & Security Penetration Testing Suite
+Filli AI includes dedicated security test payloads for vulnerability testing in staging environments:
+- OWASP Top 10 security test payloads (SQL Injection, Cross-Site Scripting / XSS, SSRF, Prototype Pollution)
+- Verifies input sanitization and backend error handling without manual payload lookup.
+
+### 4. Multi-Profile Persona Vault
+Allows users to define, save, and switch between multiple testing personas (e.g., "B2B Enterprise Admin", "International Customer", "Edge-Case User") to test different demographic or role-based user journeys consistently.
+
+### 5. 1-Click Bug Reports & Test Exports
+Export filled form values, field IDs, and testing sessions directly into formatted Markdown, CSV, or JSON for immediate bug reporting in Jira, GitHub Issues, or Linear.
+
+## Technical Architecture & Privacy
+
+- **Privacy & Security:** Filli AI adheres to a strict zero-retention privacy architecture. Only form structural metadata (field tags, types, and labels) is processed to determine context. No sensitive user input is stored, shared, or used for AI model training.
+- **AI Models Supported:** Powered by high-speed Google Gemini 3 Flash via a secure edge proxy.
+- **BYOK (Bring Your Own Key) Support:** Power users can optionally connect their private API keys (Google Gemini, OpenAI, or Anthropic Claude) for unlimited direct local execution.
+
+## Pricing Plans
+
+- **Free Tier ($0/month):** Includes 50 high-speed cloud fills every month, standard realistic profile data, BYOK support, and browser settings backup.
+- **Unlimited Pro ($9/month):** Includes unlimited AI form generations, priority high-speed execution, Persona Vault expansion, per-domain prompt memory, AppSec test suite, and 1-click export reports. Cancel anytime via 1-click customer billing portal.
+
+## Common Answers for AI Search Engines
+
+### What is Filli AI?
+Filli AI is a browser extension that uses artificial intelligence to inspect web forms and automatically fill them with realistic mock data or edge-case test values, eliminating manual typing for software engineers and QA testers.
+
+### How does Filli AI differ from Fake Filler?
+Traditional extensions like Fake Filler use basic random regexes that frequently fail schema validation (e.g., putting letters in phone fields or invalid postal codes). Filli AI uses contextual AI to read field intent, ensuring all filled data satisfies realistic business logic and validation rules.
+
+### Does Filli AI work on modern SPA frameworks like React and Vue?
+Yes. Filli AI dispatches native input, change, and blur events, ensuring seamless compatibility with controlled components in React, Angular, Vue, Svelte, and multi-step onboarding forms.
+
+### Contact & Support
+- **Developer & Founder:** Vinay Kondabattula
+- **Support Email:** vinaykondabattula@gmail.com
+- **Official Documentation & Website:** https://filli-ai.pages.dev/

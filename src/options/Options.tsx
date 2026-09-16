@@ -1,6 +1,8 @@
+import { useState, useEffect } from 'react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Lock, Settings2, CheckCircle2, AlertCircle, User, Globe } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Lock, Settings2, CheckCircle2, AlertCircle, User, ArrowRight } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { posthog } from '@/lib/posthog';
 import { Logo } from '@/components/Logo';
@@ -42,6 +44,12 @@ export const Options = () => {
     company, setCompany,
     jobTitle, setJobTitle,
     bio, setBio,
+    profiles,
+    activeProfileId,
+    handleSelectProfile,
+    handleCreateProfile,
+    handleDeleteProfile,
+    handleRenameProfile,
     isLoggedIn, setIsLoggedIn,
     userEmail, setUserEmail,
     userName, setUserName,
@@ -57,6 +65,51 @@ export const Options = () => {
     authLoading, setAuthLoading,
     handleAuthUrlOrParams
   } = useOptionsState();
+
+  const [showSavedModal, setShowSavedModal] = useState(false);
+  const [countdown, setCountdown] = useState(2);
+
+  const handleCloseTab = () => {
+    if (typeof chrome !== 'undefined' && chrome.tabs?.getCurrent) {
+      chrome.tabs.getCurrent((tab) => {
+        if (tab?.id) {
+          chrome.tabs.remove(tab.id);
+        } else {
+          window.close();
+        }
+      });
+    } else {
+      window.close();
+    }
+  };
+
+  useEffect(() => {
+    if (!showSavedModal) return;
+    if (countdown <= 0) {
+      handleCloseTab();
+      return;
+    }
+    const timer = setTimeout(() => {
+      setCountdown((prev) => prev - 1);
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [showSavedModal, countdown]);
+
+  useEffect(() => {
+    // Ensure the browser tab always displays the official Filli AI logo favicon
+    const iconUrl = typeof chrome !== 'undefined' && chrome?.runtime?.getURL
+      ? chrome.runtime.getURL('icon-32.png')
+      : '/icon-32.png';
+    
+    let link = document.querySelector("link[rel*='icon']") as HTMLLinkElement;
+    if (!link) {
+      link = document.createElement('link');
+      link.rel = 'icon';
+      document.head.appendChild(link);
+    }
+    link.type = 'image/png';
+    link.href = iconUrl;
+  }, []);
 
   const testConnection = (providerId: string, apiKey: string, customUrl?: string) => {
     if (providerId === 'gemini' || providerId === 'openai' || providerId === 'anthropic') {
@@ -145,6 +198,22 @@ export const Options = () => {
       triggerToast('Please fix validation errors first.', 'error');
       return;
     }
+    const updatedProfiles = profiles.map(p => {
+      if (p.id === activeProfileId) {
+        return {
+          ...p,
+          firstName,
+          lastName,
+          email,
+          phone,
+          company,
+          jobTitle,
+          bio
+        };
+      }
+      return p;
+    });
+
     chrome.storage.local.set({
       geminiApiKey: geminiKey,
       openaiApiKey: openaiKey,
@@ -158,12 +227,21 @@ export const Options = () => {
       profileCompany: company,
       profileJobTitle: jobTitle,
       profileBio: bio,
+      savedProfiles: updatedProfiles,
+      activeProfileId: activeProfileId,
       enableFloatingDock: enableFloatingDock
     }, () => {
       triggerToast('Settings saved successfully!');
       if (isOnboarding) {
         setProfileCompleted(true);
         setOnboardingStep('success');
+        if (typeof chrome !== 'undefined') {
+          chrome.storage?.sync?.set({ hasSeenWelcome: true, onboardingCompleted: true });
+          chrome.storage?.local?.set({ hasSeenWelcome: true, onboardingCompleted: true });
+        }
+      } else {
+        setShowSavedModal(true);
+        setCountdown(2);
       }
     });
   };
@@ -282,8 +360,16 @@ export const Options = () => {
   };
 
   const handleSkip = () => {
-    setProfileCompleted(false);
-    setOnboardingStep('success');
+    if (isOnboarding) {
+      setProfileCompleted(false);
+      setOnboardingStep('success');
+      if (typeof chrome !== 'undefined') {
+        chrome.storage?.sync?.set({ hasSeenWelcome: true, onboardingCompleted: true });
+        chrome.storage?.local?.set({ hasSeenWelcome: true, onboardingCompleted: true });
+      }
+    } else {
+      handleCloseTab();
+    }
   };
 
   return (
@@ -322,7 +408,7 @@ export const Options = () => {
             <CardHeader className="space-y-3 pb-8 pt-10 px-10">
               <div className="flex items-center justify-between">
                 <Badge variant="outline" className="text-indigo-600 border-indigo-100 bg-indigo-50/50 px-3 py-1 rounded-full text-[10px] font-bold tracking-widest uppercase">
-                  {activeTab === 'account' ? (isLoggedIn ? 'Account' : 'Sign In / Sign Up') : activeTab === 'profile' ? 'My Filli Card' : 'Developer Controls'}
+                  {activeTab === 'account' ? (isLoggedIn ? 'Account' : 'Sign In / Sign Up') : activeTab === 'profile' ? 'My Filli Card' : 'API Models (BYOK)'}
                 </Badge>
                 {isLoggedIn && activeTab === 'account' && (
                   <span className="text-[10px] font-black text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-100 flex items-center gap-1 uppercase tracking-widest animate-pulse">
@@ -333,7 +419,7 @@ export const Options = () => {
               </div>
               <CardTitle className="text-4xl font-black tracking-tight text-slate-900 flex items-center gap-3">
                 <Logo size={32} />
-                {activeTab === 'account' ? (isLoggedIn ? 'My Account' : 'Sign In / Sign Up') : activeTab === 'profile' ? 'My Profile' : 'AI Provider'}
+                {activeTab === 'account' ? (isLoggedIn ? 'My Account' : 'Sign In / Sign Up') : activeTab === 'profile' ? 'My Profile' : 'BYOK & AI Provider Setup'}
               </CardTitle>
               <CardDescription className="text-slate-500 text-base font-medium">
                 {activeTab === 'account'
@@ -342,7 +428,7 @@ export const Options = () => {
                     : 'Create a free cloud account to get 50 high-speed AI fills every month and sync profiles.')
                   : activeTab === 'profile'
                     ? 'Your personal details. Stored safely inside your browser, never shared unless you sync to cloud.'
-                    : 'Configure custom APIs, private keys, and advanced options.'}
+                    : 'Use your own API keys. Your data stays on your machine.'}
               </CardDescription>
               <div className="flex items-center gap-2 mt-2 px-3 py-1.5 bg-slate-100 rounded-xl w-fit text-[11px] font-bold text-slate-600 border border-slate-200/50">
                 <Lock className="w-3.5 h-3.5 text-indigo-500" />
@@ -369,7 +455,7 @@ export const Options = () => {
                     : 'text-slate-500 hover:text-slate-800'
                     }`}
                 >
-                  <Globe className={`w-4 h-4 transition-colors ${activeTab === 'account' ? 'text-indigo-500' : 'text-slate-400'}`} />
+                  <Logo size={16} className={`rounded-[3px] transition-transform ${activeTab === 'account' ? 'scale-110 shadow-sm' : 'opacity-70'}`} />
                   {isLoggedIn ? 'Account' : 'Sign In / Sign Up'}
                 </button>
                 <button
@@ -380,7 +466,7 @@ export const Options = () => {
                     }`}
                 >
                   <Settings2 className={`w-4 h-4 transition-colors ${activeTab === 'advanced' ? 'text-indigo-500' : 'text-slate-400'}`} />
-                  AI Provider
+                  API Models (BYOK)
                 </button>
               </div>
             </div>
@@ -427,6 +513,14 @@ export const Options = () => {
                   setBio={setBio}
                   handleSave={handleSave}
                   handleSkip={handleSkip}
+                  profiles={profiles}
+                  activeProfileId={activeProfileId}
+                  onSelectProfile={handleSelectProfile}
+                  onCreateProfile={handleCreateProfile}
+                  onDeleteProfile={handleDeleteProfile}
+                  onRenameProfile={handleRenameProfile}
+                  userPlan={userPlan}
+                  onUpgradeClick={() => setActiveTab('account')}
                 />
               )}
 
@@ -502,6 +596,42 @@ export const Options = () => {
           <span className="text-sm font-bold leading-tight">{toastMessage}</span>
         </div>
       </div>
+      {/* Confirmation Modal on Profile Save */}
+      {showSavedModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-sm w-full p-6 text-center border border-slate-100 animate-in zoom-in-95 duration-200 relative">
+            <div className="w-16 h-16 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-100 flex items-center justify-center mx-auto mb-4 shadow-sm">
+              <CheckCircle2 className="w-8 h-8" />
+            </div>
+
+            <h3 className="text-xl font-black text-slate-900 mb-1">Profile Saved!</h3>
+            <p className="text-xs text-slate-500 font-medium leading-relaxed mb-5">
+              Your identity card has been updated. You can now use the "My Profile" persona to autofill forms with your details.
+            </p>
+
+            <div className="flex items-center justify-center gap-2 text-[11px] font-bold text-slate-500 mb-5 bg-slate-50 py-1.5 px-3 rounded-full w-fit mx-auto border border-slate-100">
+              <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span>Closing tab in {countdown}s...</span>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <Button
+                onClick={handleCloseTab}
+                className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold h-11 rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer border-none text-xs"
+              >
+                <span>Done & Close Page</span>
+                <ArrowRight className="w-4 h-4" />
+              </Button>
+              <button
+                onClick={() => setShowSavedModal(false)}
+                className="w-full text-slate-400 hover:text-slate-600 text-xs font-semibold py-2 transition-colors cursor-pointer bg-transparent border-none"
+              >
+                Stay on Page & Keep Editing
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

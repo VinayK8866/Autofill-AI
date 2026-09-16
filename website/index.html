@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Filli AI — AI Form Filler & QA Edge-Case Test Data Generator</title>
+  <meta name="description" content="Instant context-aware AI form filler and QA test data generator. Fill realistic mock data, boundary edge cases, and AppSec OWASP payloads in one click.">
+  <meta name="keywords" content="AI form filler, QA test data generator, fake filler alternative, edge case testing, form autofill extension, boundary value testing, AppSec OWASP payloads, React form filler, QA automation">
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
+  <link rel="canonical" href="https://filli-ai.pages.dev/">
+  <meta name="google-site-verification" content="EnRYx-vU36UUH99ar60m_U_IjqSsEVh0dk4cMFgCKbs">
+  <meta name="google-site-verification" content="K9fTG6fvLm1Mb4PMK8t-4L_p0AQDTfdZxQ8IL0BsZ10">
+  
+  <!-- Open Graph / Social Sharing -->
+  <meta property="og:locale" content="en_US">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Filli AI — Context-Aware AI Form Filler & QA Test Data Generator">
+  <meta property="og:description" content="Fill dynamic web forms 10x faster with context-aware AI mock data, QA boundary stress-testing, and AppSec OWASP payloads in one click.">
+  <meta property="og:url" content="https://filli-ai.pages.dev/">
+  <meta property="og:site_name" content="Filli AI">
+  <meta property="og:image" content="https://filli-ai.pages.dev/icon-512.png">
+  <meta property="og:image:width" content="512">
+  <meta property="og:image:height" content="512">
+  <meta property="og:image:alt" content="Filli AI Logo">
+  
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Filli AI — Context-Aware AI Form Filler & QA Test Data Generator">
+  <meta name="twitter:description" content="Fill dynamic web forms 10x faster with context-aware AI mock data, QA boundary stress-testing, and AppSec OWASP payloads.">
+  <meta name="twitter:image" content="https://filli-ai.pages.dev/icon-512.png">
+
+  <!-- Schema.org Structured Data (AEO & Rich Snippets) -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        "@id": "https://filli-ai.pages.dev/#website",
+        "url": "https://filli-ai.pages.dev/",
+        "name": "Filli AI",
+        "description": "Next-gen AI form filler and QA edge-case test data generator for developers and QA engineers.",
+        "publisher": {
+          "@type": "Organization",
+          "name": "Filli AI",
+          "logo": {
+            "@type": "ImageObject",
+            "url": "https://filli-ai.pages.dev/icon-512.png"
+          }
+        }
+      },
+      {
+        "@type": "SoftwareApplication",
+        "@id": "https://filli-ai.pages.dev/#software",
+        "name": "Filli AI",
+        "url": "https://filli-ai.pages.dev/",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "Chrome, Chromium, Edge, Brave",
+        "softwareVersion": "1.0.3",
+        "description": "Context-aware AI form filler and QA test data generator that creates realistic mock inputs, boundary edge cases, and AppSec OWASP payloads in a single click.",
+        "offers": [
+          {
+            "@type": "Offer",
+            "name": "Free Tier",
+            "price": "0",
+            "priceCurrency": "USD",
+            "description": "50 high-speed cloud fills per month, standard realistic profile data, BYOK support."
+          },
+          {
+            "@type": "Offer",
+            "name": "Unlimited Pro",
+            "price": "9.00",
+            "priceCurrency": "USD",
+            "priceValidUntil": "2027-12-31",
+            "availability": "https://schema.org/InStock",
+            "description": "Unlimited AI form generations, Persona Vault, custom prompt memory, AppSec payloads, 1-click test exports."
+          }
+        ],
+        "featureList": [
+          "Context-aware mock data generation",
+          "QA boundary value & edge-case testing",
+          "OWASP Top 10 AppSec security test payloads",
+          "Multi-profile Persona Vault",
+          "Per-domain custom prompt memory",
+          "1-Click bug report exports to Markdown, CSV & JSON",
+          "React, Angular, Vue, and Svelte framework compatibility"
+        ]
+      },
+      {
+        "@type": "FAQPage",
+        "@id": "https://filli-ai.pages.dev/#faq",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "What is Filli AI and how does it work?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Filli AI is an intelligent browser extension that analyzes web forms in real time and automatically populates them with contextually coherent mock data, QA boundary stress-test inputs, or security payloads with a single click."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "How is Filli AI different from traditional extensions like Fake Filler?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Traditional tools rely on naive random strings or static regexes that often fail complex form validation (e.g., mismatching postal codes with states, invalid phone formats). Filli AI uses contextual AI intelligence to understand field relationships, DOM structure, and business logic to generate realistic, validation-passing data."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Does Filli AI work with React, Angular, Vue, and multi-step forms?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. Filli AI dispatches native DOM input, change, and blur events, ensuring seamless compatibility with controlled inputs, shadow DOM elements, and complex multi-step wizards across modern SPA frameworks."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "What is the Persona Vault?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "The Persona Vault allows developers and QA teams to save multiple testing profiles (such as Enterprise B2B Admin, International Shopper, or Strict Boundary User) and switch between them instantly without manual re-configuration."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Can Filli AI inject AppSec and OWASP security test payloads?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. Pro users can instantly inject curated OWASP Top 10 payloads—including SQL injection, Cross-Site Scripting (XSS), Server-Side Request Forgery (SSRF), and prototype pollution—to audit input sanitization during staging."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Is my data private and secure?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. Filli AI follows a strict zero-retention privacy architecture. Only structural metadata (field labels and types) is evaluated to infer context. No personal input data is saved or used to train public models."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Can I bring my own API key (BYOK)?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. Filli AI supports Bring Your Own Key (BYOK) for Google Gemini, OpenAI, and Anthropic Claude, allowing direct local API calls with zero additional subscription cost."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "How do I cancel or manage my subscription?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "You can view invoices, update payment methods, or cancel anytime in one click directly from our customer billing portal link in your extension settings or confirmation email."
+            }
+          }
+        ]
+      }
+    ]
+  }
+  </script>
+
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary: #4f46e5;
+      --primary-hover: #4338ca;
+      --bg-dark: #0f172a;
+      --text-main: #0f172a;
+      --text-muted: #64748b;
+      --border: #e2e8f0;
+      --card-bg: #ffffff;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      color: var(--text-main);
+      background-color: #f8fafc;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    .container { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+    header {
+      background: rgba(255, 255, 255, 0.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .nav {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      height: 72px;
+    }
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 20px;
+      font-weight: 800;
+      color: #1e1b4b;
+      text-decoration: none;
+    }
+    .logo img { width: 36px; height: 36px; border-radius: 8px; }
+    .nav-links { display: flex; gap: 24px; align-items: center; }
+    .nav-links a {
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 600;
+      transition: color 0.2s;
+    }
+    .nav-links a:hover { color: var(--primary); }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 12px 24px;
+      border-radius: 12px;
+      font-weight: 700;
+      font-size: 14px;
+      text-decoration: none;
+      transition: all 0.2s ease;
+      cursor: pointer;
+    }
+    .btn-primary {
+      background: var(--primary);
+      color: #fff;
+      border: none;
+      box-shadow: 0 4px 14px rgba(79, 70, 229, 0.3);
+    }
+    .btn-primary:hover { background: var(--primary-hover); transform: translateY(-1px); }
+    .hero {
+      padding: 88px 0 64px;
+      text-align: center;
+    }
+    .badge {
+      display: inline-block;
+      padding: 6px 14px;
+      background: #eef2ff;
+      color: var(--primary);
+      border: 1px solid #c7d2fe;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 24px;
+    }
+    h1 {
+      font-size: 52px;
+      font-weight: 900;
+      line-height: 1.15;
+      letter-spacing: -0.03em;
+      color: #0f172a;
+      margin-bottom: 20px;
+    }
+    .hero p {
+      font-size: 19px;
+      color: var(--text-muted);
+      max-width: 680px;
+      margin: 0 auto 36px;
+      line-height: 1.5;
+    }
+    .features {
+      padding: 64px 0;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 24px;
+    }
+    .feature-card {
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 32px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.02);
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .feature-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 12px 24px rgba(0,0,0,0.06);
+    }
+    .feature-icon {
+      font-size: 28px;
+      margin-bottom: 16px;
+      display: inline-block;
+    }
+    .feature-card h3 {
+      font-size: 18px;
+      font-weight: 800;
+      margin-bottom: 8px;
+      color: #0f172a;
+    }
+    .feature-card p {
+      font-size: 14px;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+    .pricing-section {
+      padding: 72px 0;
+      text-align: center;
+    }
+    .pricing-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 32px;
+      max-width: 800px;
+      margin: 40px auto 0;
+      text-align: left;
+    }
+    .pricing-card {
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      padding: 40px 32px;
+      position: relative;
+    }
+    .pricing-card.popular {
+      background: linear-gradient(135deg, #1e1b4b 0%, #0f172a 100%);
+      color: #fff;
+      border-color: #312e81;
+      box-shadow: 0 16px 36px rgba(15, 23, 42, 0.25);
+    }
+    .pricing-card.popular h3,
+    .pricing-card.popular .price { color: #fff; }
+    .pricing-card.popular p,
+    .pricing-card.popular li { color: #cbd5e1; }
+    .popular-tag {
+      position: absolute;
+      top: -12px;
+      right: 28px;
+      background: var(--primary);
+      color: #fff;
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .price {
+      font-size: 44px;
+      font-weight: 900;
+      color: #0f172a;
+      margin: 16px 0 24px;
+    }
+    .price span {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text-muted);
+    }
+    .pricing-card ul {
+      list-style: none;
+      margin-bottom: 32px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .pricing-card li {
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .contact-section {
+      background: #fff;
+      border-radius: 24px;
+      border: 1px solid var(--border);
+      padding: 48px;
+      margin: 64px 0;
+      text-align: center;
+    }
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 48px 0;
+      margin-top: 64px;
+      background: #fff;
+    }
+    .footer-content {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 20px;
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+    .footer-links {
+      display: flex;
+      gap: 24px;
+    }
+    .footer-links a {
+      color: var(--text-muted);
+      text-decoration: none;
+      font-weight: 600;
+    }
+    .footer-links a:hover { color: var(--primary); }
+    .faq-section {
+      padding: 72px 0 24px;
+    }
+    .faq-header {
+      text-align: center;
+      margin-bottom: 40px;
+    }
+    .faq-header h2 {
+      font-size: 32px;
+      font-weight: 900;
+      letter-spacing: -0.02em;
+      color: #0f172a;
+      margin-top: 8px;
+    }
+    .faq-list {
+      max-width: 860px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .faq-item {
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 24px 28px;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .faq-item:hover {
+      border-color: #cbd5e1;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.03);
+    }
+    .faq-question {
+      font-size: 17px;
+      font-weight: 700;
+      color: #0f172a;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .faq-question::before {
+      content: "Q";
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 26px;
+      height: 26px;
+      border-radius: 8px;
+      background: #eef2ff;
+      color: var(--primary);
+      font-size: 13px;
+      font-weight: 800;
+      flex-shrink: 0;
+    }
+    .faq-answer {
+      font-size: 15px;
+      color: var(--text-muted);
+      line-height: 1.65;
+      padding-left: 38px;
+    }
+    .faq-answer strong {
+      color: #1e293b;
+    }
+    @media (max-width: 768px) {
+      h1 { font-size: 38px; }
+      .footer-content { flex-direction: column; text-align: center; }
+      .faq-answer { padding-left: 0; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="container nav">
+      <a href="index.html" class="logo">
+        <img src="icon-128.png" alt="Filli AI">
+        <span>Filli AI</span>
+      </a>
+      <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#pricing">Pricing</a>
+        <a href="#faq">FAQ</a>
+        <a href="#contact">Support</a>
+        <a href="terms.html">Terms</a>
+        <a href="refund.html">Refunds</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="hero">
+      <div class="badge">Next-Gen AI Form Filling</div>
+      <h1>Test Forms 10x Faster with<br>Context-Aware AI Intelligence</h1>
+      <p>Instant edge-case, boundary validation, and realistic test data generation for developers, QA engineers, and automated testing workflows.</p>
+      <a href="#pricing" class="btn btn-primary">Get Started with Pro</a>
+    </section>
+
+    <section id="features" class="features">
+      <div class="feature-card">
+        <div class="feature-icon">👤</div>
+        <h3>Multi-Profile Persona Vault</h3>
+        <p>Switch between Job Seeker, QA Boundary Tester, and B2B Persona presets in one click without re-typing credentials or edge-case rules.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🧠</div>
+        <h3>Per-Domain Prompt Memory</h3>
+        <p>Pin custom form filling instructions per domain (e.g. greenhouse.io, lever.co). Filli AI automatically adapts to each website's format.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🛡️</div>
+        <h3>AppSec Penetration Test Data</h3>
+        <p>Inject OWASP Top 10 security test payloads (SQLi, SSRF, XSS, prototype pollution) directly into web forms for thorough security auditing.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📊</div>
+        <h3>1-Click Bug Reports & Export</h3>
+        <p>Export test runs, filled values, and field metadata instantly into formatted Markdown, CSV, or JSON for bug tracking in Jira or GitHub.</p>
+      </div>
+    </section>
+
+    <section id="pricing" class="pricing-section">
+      <div class="badge">Transparent Pricing</div>
+      <h2>Simple, Predictable Plans</h2>
+      <p style="color: var(--text-muted); margin-top: 8px;">No hidden fees. Cancel anytime directly in our 1-click customer billing portal.</p>
+
+      <div class="pricing-cards">
+        <div class="pricing-card">
+          <h3>Free Tier</h3>
+          <p>Great for casual form testing and personal use.</p>
+          <div class="price">$0<span> / month</span></div>
+          <ul>
+            <li>✓ 50 high-speed cloud fills every month</li>
+            <li>✓ Standard realistic profile data</li>
+            <li>✓ Bring Your Own API Key (BYOK) support</li>
+            <li>✓ Settings sync across browsers</li>
+          </ul>
+          <a href="#" class="btn" style="background:#f1f5f9; color:#334155; width:100%;">Included Free</a>
+        </div>
+
+        <div class="pricing-card popular">
+          <div class="popular-tag">Most Popular</div>
+          <h3>Unlimited Pro</h3>
+          <p>For power users, QA teams, and security professionals.</p>
+          <div class="price">$9<span> / month</span></div>
+          <ul>
+            <li>✓ <strong>Unlimited</strong> AI form generations</li>
+            <li>✓ Priority high-speed Gemini 3 Flash execution</li>
+            <li>✓ Multi-Profile Persona Vault</li>
+            <li>✓ Per-Domain Custom Prompt Memory</li>
+            <li>✓ AppSec & Security Penetration Test Suite</li>
+            <li>✓ 1-Click Markdown, CSV & JSON Export Reports</li>
+            <li>✓ Priority customer support</li>
+          </ul>
+          <button onclick="openProCheckout()" class="btn btn-primary" style="width:100%; border:none; cursor:pointer;">Upgrade to Unlimited Pro</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="faq" class="faq-section">
+      <div class="faq-header">
+        <div class="badge">Frequently Asked Questions</div>
+        <h2>Got Questions? We've Got Answers.</h2>
+        <p style="color: var(--text-muted); margin-top: 8px;">Everything you need to know about Filli AI form filling, QA edge-case testing, and security auditing.</p>
+      </div>
+
+      <div class="faq-list">
+        <article class="faq-item">
+          <h3 class="faq-question">What is Filli AI and how does it work?</h3>
+          <p class="faq-answer">Filli AI is an intelligent browser extension that analyzes web forms in real time and automatically populates them with contextually coherent mock data, QA boundary stress-test inputs, or security payloads with a single click. It examines input attributes, labels, and surrounding DOM context to generate valid, realistic values rather than random junk.</p>
+        </article>
+
+        <article class="faq-item">
+          <h3 class="faq-question">How is Filli AI different from traditional extensions like Fake Filler?</h3>
+          <p class="faq-answer">Traditional tools rely on naive random strings or static regexes that often fail complex form validation (e.g., mismatching postal codes with states, invalid phone formats, or rejected corporate email fields). Filli AI uses contextual AI intelligence to understand field relationships, DOM structure, and business logic to generate realistic, validation-passing data every time.</p>
+        </article>
+
+        <article class="faq-item">
+          <h3 class="faq-question">Does Filli AI work with React, Angular, Vue, and multi-step forms?</h3>
+          <p class="faq-answer">Yes. Filli AI dispatches native DOM input, change, and blur events, ensuring seamless compatibility with controlled inputs, shadow DOM elements, and complex multi-step wizards across modern SPA frameworks.</p>
+        </article>
+
+        <article class="faq-item">
+          <h3 class="faq-question">What is the Persona Vault?</h3>
+          <p class="faq-answer">The Persona Vault allows developers and QA teams to save multiple testing profiles (such as Enterprise B2B Admin, International Shopper, or Strict Boundary User) and switch between them instantly without manual re-configuration.</p>
+        </article>
+
+        <article class="faq-item">
+          <h3 class="faq-question">Can Filli AI inject AppSec and OWASP security test payloads?</h3>
+          <p class="faq-answer">Yes. Pro users can instantly inject curated OWASP Top 10 payloads—including SQL injection, Cross-Site Scripting (XSS), Server-Side Request Forgery (SSRF), and prototype pollution—to audit input sanitization during staging.</p>
+        </article>
+
+        <article class="faq-item">
+          <h3 class="faq-question">Is my data private and secure?</h3>
+          <p class="faq-answer">Yes. Filli AI follows a strict zero-retention privacy architecture. Only structural metadata (field labels and types) is evaluated to infer context. No personal input data is saved, shared, or used to train public models.</p>
+        </article>
+
+        <article class="faq-item">
+          <h3 class="faq-question">Can I bring my own API key (BYOK)?</h3>
+          <p class="faq-answer">Yes. Filli AI supports Bring Your Own Key (BYOK) for Google Gemini, OpenAI, and Anthropic Claude, allowing direct local API calls with zero additional subscription cost.</p>
+        </article>
+
+        <article class="faq-item">
+          <h3 class="faq-question">How do I cancel or manage my subscription?</h3>
+          <p class="faq-answer">You can view invoices, update payment methods, or cancel anytime in one click directly from our customer billing portal link in your extension settings or confirmation email. We also offer a 14-day money-back guarantee.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="contact" class="contact-section">
+      <h3>Customer Support & Inquiries</h3>
+      <p style="color: var(--text-muted); margin: 12px 0 24px;">Need help with your subscription, custom enterprise requirements, or technical support?</p>
+      <p><strong>Support Email:</strong> <a href="mailto:vinaykondabattula@gmail.com" style="color:var(--primary); font-weight:700;">vinaykondabattula@gmail.com</a></p>
+      <p style="font-size:12px; color:var(--text-muted); margin-top:8px;">Response time: Within 24 business hours.</p>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container footer-content">
+      <div>
+        <strong>Filli AI</strong> — &copy; 2026. All rights reserved.
+      </div>
+      <div class="footer-links">
+        <a href="terms.html">Terms of Service</a>
+        <a href="privacy.html">Privacy Policy</a>
+        <a href="refund.html">Refund Policy</a>
+        <a href="llms.txt">LLM / AI Docs</a>
+        <a href="mailto:vinaykondabattula@gmail.com">Contact</a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>
+  <script type="text/javascript">
+    Paddle.Environment.set('production');
+    Paddle.Initialize({ 
+      token: 'live_4c77600241d1bff312cd863690a',
+      checkout: {
+        settings: {
+          successUrl: 'https://filli-ai.pages.dev/success.html',
+          displayMode: 'overlay',
+          theme: 'light'
+        }
+      },
+      eventCallback: function(event) {
+        console.log('[Paddle Event]', event);
+        if (event && (
+          event.name === 'checkout.completed' ||
+          event.name === 'checkout.payment-complete' ||
+          event.name === 'checkout.payment.completed'
+        )) {
+          console.log('Checkout completed event detected, redirecting...', event);
+          try { Paddle.Checkout.close(); } catch(e) {}
+          window.location.href = 'https://filli-ai.pages.dev/success.html';
+        }
+      }
+    });
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const ptxn = urlParams.get('_ptxn');
+    if (ptxn) {
+      Paddle.Checkout.open({
+        transactionId: ptxn,
+        settings: {
+          successUrl: 'https://filli-ai.pages.dev/success.html'
+        }
+      });
+    }
+
+    function openProCheckout() {
+      Paddle.Checkout.open({
+        items: [{ priceId: 'pri_01m2hqxpgpvh9acm5m9wx1k4yv', quantity: 1 }],
+        settings: {
+          successUrl: 'https://filli-ai.pages.dev/success.html'
+        }
+      });
+    }
+  </script>
+</body>
+</html>

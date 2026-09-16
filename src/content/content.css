@@ -40,6 +40,7 @@
 
 /* Compact Bubble Mode */
 .af-dock-bubble {
+  position: relative;
   width: 52px;
   height: 52px;
   background: #ffffff;
@@ -51,10 +52,48 @@
   cursor: pointer;
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.08), inset 0 0 0 1px rgba(255, 255, 255, 0.2);
   transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  padding: 6px;
+  box-sizing: border-box;
+}
+.af-dock-bubble-logo {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  object-fit: cover;
+  box-shadow: 0 4px 12px rgba(124, 58, 237, 0.28);
+  transition: transform 0.3s ease;
+  pointer-events: none;
+  display: block;
+}
+.af-bubble-limit-dot {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 18px;
+  height: 18px;
+  background: #ef4444;
+  color: white;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid white;
+  box-shadow: 0 2px 6px rgba(239, 68, 68, 0.4);
+  animation: af-bounce 1.2s infinite;
+  z-index: 2;
+}
+@keyframes af-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
 }
 .af-dock-bubble:hover {
   transform: scale(1.1) rotate(12deg);
   box-shadow: 0 15px 30px rgba(0, 0, 0, 0.12);
+}
+.af-dock-bubble:hover .af-dock-bubble-logo {
+  transform: scale(1.08);
 }
 
 /* Header */
@@ -78,6 +117,16 @@
   align-items: center;
   justify-content: center;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
+  overflow: hidden;
+  padding: 2px;
+  box-sizing: border-box;
+}
+.af-dock-header-logo {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  object-fit: cover;
+  display: block;
 }
 .af-dock-title {
   font-family: var(--af-font-title);
@@ -113,6 +162,166 @@
   background: rgba(0, 0, 0, 0.05);
   color: var(--af-text);
   transform: scale(1.05);
+}
+
+/* Header Right & Quota Pill */
+.af-dock-header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.af-dock-quota-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: 20px;
+  padding: 3px 8px;
+  font-family: var(--af-font-body);
+  font-size: 10px;
+  font-weight: 700;
+  color: #4f46e5;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+.af-dock-quota-pill:hover {
+  background: rgba(99, 102, 241, 0.16);
+  border-color: rgba(99, 102, 241, 0.35);
+  transform: translateY(-1px);
+}
+.af-dock-quota-pill.limited {
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.25);
+  color: #dc2626;
+}
+.af-dock-quota-pill.limited:hover {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.4);
+}
+.af-quota-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.af-quota-dot.green {
+  background: #10b981;
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
+}
+.af-quota-dot.amber {
+  background: #f59e0b;
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.6);
+}
+.af-quota-dot.red {
+  background: #ef4444;
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.6);
+}
+
+/* Quota Status Card */
+.af-quota-card {
+  background: linear-gradient(135deg, rgba(248, 250, 252, 0.95) 0%, rgba(241, 245, 249, 0.85) 100%);
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  border-radius: 14px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.02);
+  transition: all 0.25s ease;
+}
+.af-quota-card.limited {
+  background: linear-gradient(135deg, rgba(254, 242, 242, 0.95) 0%, rgba(255, 241, 242, 0.8) 100%);
+  border-color: rgba(254, 202, 202, 0.9);
+}
+.af-quota-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.af-quota-tier-badge {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.af-tier-name {
+  font-family: var(--af-font-title);
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--af-text);
+  letter-spacing: -0.01em;
+}
+.af-limited-tag {
+  font-size: 8px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: rgba(239, 68, 68, 0.12);
+  color: #dc2626;
+  padding: 1.5px 5px;
+  border-radius: 5px;
+}
+.af-quota-stat {
+  font-size: 10.5px;
+  font-weight: 800;
+  color: #475569;
+}
+.af-quota-stat.limited {
+  color: #dc2626;
+}
+.af-quota-progress-track {
+  width: 100%;
+  height: 4px;
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 99px;
+  overflow: hidden;
+}
+.af-quota-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #6366f1 0%, #8b5cf6 100%);
+  border-radius: 99px;
+  transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.af-quota-progress-bar.warning {
+  background: linear-gradient(90deg, #f59e0b 0%, #f97316 100%);
+}
+.af-quota-progress-bar.exhausted {
+  background: linear-gradient(90deg, #ef4444 0%, #dc2626 100%);
+}
+.af-quota-alert {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(239, 68, 68, 0.15);
+}
+.af-quota-alert-msg {
+  font-size: 9.5px;
+  font-weight: 600;
+  color: #b91c1c;
+  line-height: 1.25;
+  flex: 1;
+}
+.af-quota-cta-btn {
+  background: #ef4444;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 3px 7px;
+  font-family: var(--af-font-body);
+  font-size: 9.5px;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s;
+  box-shadow: 0 2px 4px rgba(239, 68, 68, 0.25);
+  flex-shrink: 0;
+}
+.af-quota-cta-btn:hover {
+  background: #dc2626;
+  transform: translateY(-1px);
 }
 
 /* Persona Selector tabs */
@@ -250,26 +459,11 @@
 
 .af-dock-subactions {
   display: grid;
-  grid-template-cols: 1.2fr 1fr 0.8fr;
-  gap: 6px;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
 }
-.af-btn-qa-quick {
-  background: rgba(245, 158, 11, 0.1);
-  border: 1px solid rgba(245, 158, 11, 0.3);
-  border-radius: 12px;
-  height: 36px;
-  font-family: var(--af-font-body);
-  font-size: 11px;
-  font-weight: 800;
-  color: #b45309;
-  cursor: pointer;
-  transition: all 0.25s;
-  white-space: nowrap;
-}
-.af-btn-qa-quick:hover {
-  background: rgba(245, 158, 11, 0.2);
-  border-color: rgba(245, 158, 11, 0.5);
-  transform: translateY(-1px);
+.af-dock-subactions.has-undo {
+  grid-template-columns: 1fr 1fr 1fr;
 }
 .af-btn-secondary {
   background: rgba(0, 0, 0, 0.04);
@@ -285,6 +479,27 @@
 }
 .af-btn-secondary:hover {
   background: rgba(0, 0, 0, 0.08);
+}
+.af-btn-warning {
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  border-radius: 12px;
+  height: 36px;
+  font-family: var(--af-font-body);
+  font-size: 11px;
+  font-weight: 700;
+  color: #d97706;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  transition: all 0.25s;
+}
+.af-btn-warning:hover {
+  background: rgba(245, 158, 11, 0.16);
+  border-color: rgba(245, 158, 11, 0.35);
+  color: #b45309;
 }
 .af-btn-danger {
   background: rgba(239, 68, 68, 0.06);
@@ -303,6 +518,69 @@
   border-color: rgba(239, 68, 68, 0.2);
 }
 
+/* QA Fuzz Flavor Selector */
+.af-qa-flavor-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+  background: rgba(245, 158, 11, 0.05);
+  border: 1px solid rgba(245, 158, 11, 0.15);
+  border-radius: 12px;
+  padding: 6px 8px;
+}
+.af-qa-flavor-pills {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+}
+.af-qa-flavor-pill {
+  background: transparent;
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  border-radius: 8px;
+  padding: 4px 2px;
+  font-family: var(--af-font-body);
+  font-size: 9px;
+  font-weight: 700;
+  color: #b45309;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: center;
+  white-space: nowrap;
+}
+.af-qa-flavor-pill:hover {
+  background: rgba(245, 158, 11, 0.12);
+}
+.af-qa-flavor-pill.active {
+  background: #f59e0b;
+  border-color: #d97706;
+  color: white;
+  box-shadow: 0 2px 6px rgba(245, 158, 11, 0.35);
+}
+
+/* Clipboard Fill Button */
+.af-btn-clipboard {
+  background: rgba(99, 102, 241, 0.04);
+  border: 1px dashed rgba(99, 102, 241, 0.25);
+  border-radius: 12px;
+  height: 32px;
+  font-family: var(--af-font-body);
+  font-size: 11px;
+  font-weight: 700;
+  color: #4f46e5;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+.af-btn-clipboard:hover {
+  background: rgba(99, 102, 241, 0.1);
+  border-color: rgba(99, 102, 241, 0.45);
+  transform: translateY(-1px);
+}
+
 /* Shortcut Footer Info */
 .af-dock-footer {
   display: flex;
@@ -312,6 +590,16 @@
   font-weight: 600;
   border-top: 1px solid rgba(0, 0, 0, 0.04);
   padding-top: 10px;
+}
+.af-dock-footer-quota {
+  cursor: pointer;
+  color: var(--af-text-muted);
+  transition: all 0.2s;
+  text-decoration: none;
+}
+.af-dock-footer-quota:hover {
+  color: #4f46e5;
+  text-decoration: underline;
 }
 
 /* Visual Pulse Magic Fill Animation */

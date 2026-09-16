@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { posthog } from '@/lib/posthog';
 import { ENV } from '@/config/env';
+import { type SavedProfile, DEFAULT_PROFILE_ID, loadSavedProfiles, syncActiveProfileToStorage } from '@/lib/profileManager';
 
 export function useOptionsState() {
   const [activeTab, setActiveTab] = useState<'account' | 'profile' | 'advanced'>('profile');
@@ -49,6 +50,10 @@ export function useOptionsState() {
   const [company, setCompany] = useState('');
   const [jobTitle, setJobTitle] = useState('');
   const [bio, setBio] = useState('');
+
+  // Multi-Profile Vault state
+  const [profiles, setProfiles] = useState<SavedProfile[]>([]);
+  const [activeProfileId, setActiveProfileId] = useState<string>(DEFAULT_PROFILE_ID);
 
   // SaaS Account Auth state
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -325,6 +330,21 @@ export function useOptionsState() {
           });
         }
 
+        loadSavedProfiles().then(({ profiles: loadedProfiles, activeId }) => {
+          setProfiles(loadedProfiles);
+          setActiveProfileId(activeId);
+          const active = loadedProfiles.find(p => p.id === activeId) || loadedProfiles[0];
+          if (active) {
+            setFirstName(active.firstName);
+            setLastName(active.lastName);
+            setEmail(active.email);
+            setPhone(active.phone);
+            setCompany(active.company);
+            setJobTitle(active.jobTitle);
+            setBio(active.bio);
+          }
+        });
+
         if (typeof result.authToken === 'string') {
           const token = result.authToken;
           setAuthToken(token);
@@ -447,16 +467,115 @@ export function useOptionsState() {
     checkLocalAI();
   }, []);
 
+  const handleSelectProfile = (id: string) => {
+    const target = profiles.find(p => p.id === id);
+    if (!target) return;
+    setActiveProfileId(id);
+    setFirstName(target.firstName);
+    setLastName(target.lastName);
+    setEmail(target.email);
+    setPhone(target.phone);
+    setCompany(target.company);
+    setJobTitle(target.jobTitle);
+    setBio(target.bio);
+    setPhoneError('');
+    syncActiveProfileToStorage(target);
+  };
+
+  const handleCreateProfile = (name: string): boolean => {
+    if (userPlan !== 'Pro Plan' && profiles.length >= 1) {
+      return false;
+    }
+    const newProfile: SavedProfile = {
+      id: `profile_${Date.now()}`,
+      name: name.trim() || `Profile ${profiles.length + 1}`,
+      firstName: '',
+      lastName: '',
+      email: '',
+      phone: '',
+      company: '',
+      jobTitle: '',
+      bio: '',
+      createdAt: Date.now()
+    };
+    const updated = [...profiles, newProfile];
+    setProfiles(updated);
+    setActiveProfileId(newProfile.id);
+    setFirstName('');
+    setLastName('');
+    setEmail('');
+    setPhone('');
+    setCompany('');
+    setJobTitle('');
+    setBio('');
+    setPhoneError('');
+    chrome.storage.local.set({
+      savedProfiles: updated,
+      activeProfileId: newProfile.id
+    });
+    syncActiveProfileToStorage(newProfile);
+    return true;
+  };
+
+  const handleDeleteProfile = (id: string) => {
+    if (profiles.length <= 1) return;
+    const updated = profiles.filter(p => p.id !== id);
+    setProfiles(updated);
+    let newActiveId = activeProfileId;
+    if (activeProfileId === id) {
+      newActiveId = updated[0].id;
+      const newActive = updated[0];
+      setActiveProfileId(newActiveId);
+      setFirstName(newActive.firstName);
+      setLastName(newActive.lastName);
+      setEmail(newActive.email);
+      setPhone(newActive.phone);
+      setCompany(newActive.company);
+      setJobTitle(newActive.jobTitle);
+      setBio(newActive.bio);
+      syncActiveProfileToStorage(newActive);
+    }
+    chrome.storage.local.set({
+      savedProfiles: updated,
+      activeProfileId: newActiveId
+    });
+  };
+
+  const handleRenameProfile = (id: string, newName: string) => {
+    const updated = profiles.map(p => p.id === id ? { ...p, name: newName } : p);
+    setProfiles(updated);
+    chrome.storage.local.set({ savedProfiles: updated });
+  };
+
   useEffect(() => {
     if (loadingSettings) return;
 
     const delayDebounceFn = setTimeout(() => {
+      // Also update the active profile in profiles list
+      const updatedProfiles = profiles.map(p => {
+        if (p.id === activeProfileId) {
+          return {
+            ...p,
+            firstName,
+            lastName,
+            email,
+            phone,
+            company,
+            jobTitle,
+            bio
+          };
+        }
+        return p;
+      });
+
       chrome.storage.local.set({
         geminiApiKey: geminiKey,
         openaiApiKey: openaiKey,
         anthropicApiKey: anthropicKey,
         aiProvider: provider,
         cloudProxyUrl: proxyUrl,
+        savedProfiles: updatedProfiles,
+        activeProfileId: activeProfileId,
         profileFirstName: firstName,
         profileLastName: lastName,
         profileEmail: email,
@@ -521,6 +640,12 @@ export function useOptionsState() {
     checkoutUrl, setCheckoutUrl,
     authError, setAuthError,
     authLoading, setAuthLoading,
-    handleAuthUrlOrParams
+    handleAuthUrlOrParams,
+    profiles, setProfiles,
+    activeProfileId, setActiveProfileId,
+    handleSelectProfile,
+    handleCreateProfile,
+    handleDeleteProfile,
+    handleRenameProfile
   };
 }

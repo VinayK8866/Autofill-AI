@@ -2,7 +2,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { Sparkles, User, AlertCircle, Globe, CheckCircle2, Lock, ArrowRight } from 'lucide-react';
+import { Sparkles, User, AlertCircle, CheckCircle2, Lock, ArrowRight, Building2 } from 'lucide-react';
 import { Logo } from '@/components/Logo';
 
 interface OnboardingWizardProps {
@@ -98,7 +98,7 @@ export const OnboardingWizard = ({
                       : 'bg-slate-50 border-slate-100 text-slate-600 hover:bg-slate-100'
                       }`}
                   >
-                    ✨ Default (Mock)
+                    ✨ Default (Fake Data)
                   </button>
                   <button
                     onClick={() => setPreviewPersona('profile')}
@@ -145,7 +145,7 @@ export const OnboardingWizard = ({
               <div className="space-y-1">
                 <h5 className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
                   <Sparkles className="w-3.5 h-3.5 text-indigo-500 fill-indigo-50" />
-                  Default Mocking
+                  Default Fake Data
                 </h5>
                 <p className="text-xs text-slate-600 leading-relaxed font-medium">
                   Generates random, highly coherent fake details (names, emails, countries, addresses) matching the form fields. Active immediately without any setup!
@@ -177,7 +177,7 @@ export const OnboardingWizard = ({
             {previewPersona === 'b2b' && (
               <div className="space-y-1">
                 <h5 className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
-                  <Globe className="w-3.5 h-3.5 text-indigo-500 fill-indigo-50" />
+                  <Building2 className="w-3.5 h-3.5 text-indigo-500 fill-indigo-50" />
                   B2B Corporate Mode
                 </h5>
                 <p className="text-xs text-slate-600 leading-relaxed font-medium">

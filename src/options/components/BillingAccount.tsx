@@ -1,6 +1,8 @@
+import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { User, LogOut, Zap, Sparkles } from 'lucide-react';
+import { User, LogOut, Zap, Sparkles, Loader2, AlertCircle } from 'lucide-react';
+import { ENV } from '@/config/env';
 
 interface BillingAccountProps {
   isLoggedIn: boolean;
@@ -39,14 +41,139 @@ export const BillingAccount = ({
   handleLogout,
   setActiveTab
 }: BillingAccountProps) => {
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [portalLoading, setPortalLoading] = useState(false);
+  const [portalError, setPortalError] = useState<string | null>(null);
+  const [cancelLoading, setCancelLoading] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
+
+  const handleCancelSubscription = async () => {
+    const confirmCancel = window.confirm(
+      'Are you sure you want to cancel your Pro Plan subscription? You will immediately revert to the Free Tier.'
+    );
+    if (!confirmCancel) return;
+
+    setCancelLoading(true);
+    setCancelError(null);
+
+    try {
+      const cloudUrl = ENV.CLOUD_PROXY_URL || 'https://autofill-ai-proxy.vinaykondabattula.workers.dev';
+      const res = await fetch(`${cloudUrl}/subscription/cancel`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`
+        }
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to cancel subscription.');
+      }
+
+      if (chrome.storage && chrome.storage.local) {
+        chrome.storage.local.set({ userPlan: 'Free Tier' });
+      }
+      window.location.reload();
+    } catch (err: any) {
+      console.error('[BillingAccount] Cancel error:', err);
+      setCancelError(err.message || 'Unable to cancel subscription. Please use the Customer Billing Portal.');
+    } finally {
+      setCancelLoading(false);
+    }
+  };
+
+  const handleOpenCustomerPortal = async () => {
+    setPortalError(null);
+
+    // 1. If we already have a valid direct customer portal link ID (/cpl_)
+    if (customerPortalUrl && customerPortalUrl.includes('/cpl_')) {
+      window.open(customerPortalUrl, '_blank');
+      return;
+    }
+
+    setPortalLoading(true);
+    try {
+      const cloudUrl = ENV.CLOUD_PROXY_URL || 'https://autofill-ai-proxy.vinaykondabattula.workers.dev';
+      const res = await fetch(`${cloudUrl}/portal/paddle`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`
+        }
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.portalUrl) {
+        throw new Error(data.error || 'No active billing portal session found.');
+      }
+
+      if (chrome.storage && chrome.storage.local) {
+        chrome.storage.local.set({ customerPortalUrl: data.portalUrl });
+      }
+      window.open(data.portalUrl, '_blank');
+    } catch (err: any) {
+      console.error('[BillingAccount] Portal error:', err);
+      setPortalError(err.message || 'Unable to open billing portal. Please try again or contact support.');
+    } finally {
+      setPortalLoading(false);
+    }
+  };
+
+  const handleUpgradeCheckout = async () => {
+    setCheckoutError(null);
+    const gateway = ENV.PAYMENT_GATEWAY || 'paddle';
+
+    if (gateway === 'lemonsqueezy') {
+      const activeCheckoutUrl = checkoutUrl || ENV.LEMON_SQUEEZY_CHECKOUT_URL || 'https://autofill-ai.lemonsqueezy.com/buy/mock-variant-id';
+      const lemonSqueezyUrl = `${activeCheckoutUrl}?checkout[custom][user_id]=${userId}&checkout[email]=${encodeURIComponent(userEmail)}`;
+      window.open(lemonSqueezyUrl, '_blank');
+      return;
+    }
+
+    // Paddle Checkout Flow: generate checkout transaction session via Cloudflare Worker
+    setCheckoutLoading(true);
+    try {
+      if (ENV.PADDLE_CHECKOUT_URL) {
+        const directUrl = `${ENV.PADDLE_CHECKOUT_URL}?customer_email=${encodeURIComponent(userEmail)}`;
+        window.open(directUrl, '_blank');
+        setCheckoutLoading(false);
+        return;
+      }
+
+      const cloudUrl = ENV.CLOUD_PROXY_URL || 'https://autofill-ai-proxy.vinaykondabattula.workers.dev';
+      const res = await fetch(`${cloudUrl}/checkout/paddle`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`
+        }
+      });
+
+      const data = await res.json().catch(() => null);
+
+      if (res.ok && data?.checkoutUrl) {
+        window.open(data.checkoutUrl, '_blank');
+      } else {
+        const errMsg = data?.error || 'Unable to initiate Paddle checkout session. Please check your credentials or network.';
+        setCheckoutError(errMsg);
+      }
+    } catch (err: any) {
+      setCheckoutError(err?.message || 'Network error connecting to payment gateway.');
+    } finally {
+      setCheckoutLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
       {/* Promo/Warning Banner for anonymous users */}
       {!isLoggedIn && (
-        <div className={`p-6 rounded-2xl border text-amber-950 shadow-inner space-y-3 relative overflow-hidden mb-2 ${usageCount >= 10 
-          ? 'bg-gradient-to-r from-red-500/15 via-orange-500/10 to-transparent border-red-200' 
+        <div className={`p-6 rounded-2xl border text-amber-950 shadow-inner space-y-3 relative overflow-hidden mb-2 ${usageCount >= 10
+          ? 'bg-gradient-to-r from-red-500/15 via-orange-500/10 to-transparent border-red-200'
           : 'bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-transparent border-amber-200'
-        }`}>
+          }`}>
           <div className="absolute -right-8 -top-8 w-24 h-24 bg-amber-500/10 rounded-full blur-2xl" />
           <div className="flex items-start gap-4">
             <div className={`p-2.5 rounded-xl shrink-0 shadow-md text-white ${usageCount >= 10 ? 'bg-red-500' : 'bg-amber-600'}`}>
@@ -54,14 +181,14 @@ export const BillingAccount = ({
             </div>
             <div className="space-y-1">
               <h4 className="text-sm font-black tracking-tight uppercase leading-snug">
-                {usageCount >= 10 
-                  ? "Anonymous Limit Reached (10/10 Fills)!" 
+                {usageCount >= 10
+                  ? "Anonymous Limit Reached (10/10 Fills)!"
                   : `Using Anonymous Cloud Tier (${Math.max(0, 10 - usageCount)}/10 Fills Left)`
                 }
               </h4>
               <p className="text-xs font-semibold leading-relaxed text-slate-600">
-                {usageCount >= 10 
-                  ? "You have completed your free limit of 10 anonymous cloud fills. Sign in or register a free account to instantly unlock 50 high-speed cloud fills every month!" 
+                {usageCount >= 10
+                  ? "You have completed your free limit of 10 anonymous cloud fills. Sign in or register a free account to instantly unlock 50 high-speed cloud fills every month!"
                   : "You are currently running in anonymous cloud mode. Create a free account to instantly unlock 50 fast cloud fills every month, back up your profile card, and sync settings across browsers."
                 }
               </p>
@@ -193,15 +320,41 @@ export const BillingAccount = ({
                 </div>
               </div>
               <Button
-                onClick={() => {
-                  const portalUrl = customerPortalUrl || 'https://autofill-ai.lemonsqueezy.com/billing';
-                  window.open(portalUrl, '_blank');
-                }}
+                onClick={handleOpenCustomerPortal}
+                disabled={portalLoading}
                 variant="outline"
                 className="w-full border-slate-200 hover:bg-slate-100 text-slate-700 font-bold h-10 rounded-xl cursor-pointer flex items-center justify-center gap-2 transition-all bg-white"
               >
-                <span>Open Customer Billing Portal</span>
+                {portalLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-indigo-600" />
+                    <span>Accessing Billing Portal...</span>
+                  </>
+                ) : (
+                  <span>Open Customer Billing Portal</span>
+                )}
               </Button>
+              {portalError && (
+                <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50 p-2.5 rounded-lg border border-amber-200/60">
+                  <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0 text-amber-600" />
+                  <span>{portalError}</span>
+                </div>
+              )}
+              <div className="pt-1 flex justify-center">
+                <button
+                  onClick={handleCancelSubscription}
+                  disabled={cancelLoading}
+                  className="text-xs text-red-500 hover:text-red-700 font-semibold hover:underline bg-transparent border-none p-0 cursor-pointer disabled:opacity-50"
+                >
+                  {cancelLoading ? 'Cancelling Subscription...' : 'Cancel Subscription'}
+                </button>
+              </div>
+              {cancelError && (
+                <div className="flex items-start gap-2 text-xs text-red-600 bg-red-50 p-2.5 rounded-lg border border-red-200/60">
+                  <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0 text-red-500" />
+                  <span>{cancelError}</span>
+                </div>
+              )}
             </div>
           )}
 
@@ -212,7 +365,7 @@ export const BillingAccount = ({
               <div className="flex justify-between items-start">
                 <div>
                   <Badge className="bg-indigo-600 text-white border-none text-[9px] uppercase tracking-widest font-black px-2.5 py-0.5 rounded-full mb-1">
-                    SaaS Upgrade
+                    Upgrade
                   </Badge>
                   <h3 className="text-lg font-black tracking-tight leading-snug">Go Unlimited with Pro</h3>
                 </div>
@@ -234,17 +387,42 @@ export const BillingAccount = ({
                 </li>
               </ul>
 
+              {checkoutError && (
+                <div className="flex items-center gap-2 p-3 rounded-xl bg-red-500/15 border border-red-500/30 text-red-200 text-xs font-medium">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
+                  <span>{checkoutError}</span>
+                </div>
+              )}
+
               <Button
-                onClick={() => {
-                  const activeCheckoutUrl = checkoutUrl || import.meta.env.VITE_LEMON_SQUEEZY_CHECKOUT_URL || 'https://autofill-ai.lemonsqueezy.com/buy/mock-variant-id';
-                  const lemonSqueezyUrl = `${activeCheckoutUrl}?checkout[custom][user_id]=${userId}&checkout[email]=${encodeURIComponent(userEmail)}`;
-                  window.open(lemonSqueezyUrl, '_blank');
-                }}
-                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold h-11 rounded-xl shadow-lg border-none mt-2 flex items-center justify-center gap-2 cursor-pointer transition-all"
+                onClick={handleUpgradeCheckout}
+                disabled={checkoutLoading}
+                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold h-11 rounded-xl shadow-lg border-none mt-2 flex items-center justify-center gap-2 cursor-pointer transition-all disabled:opacity-60"
               >
-                <Zap className="w-4 h-4 fill-amber-300 text-amber-300 animate-pulse" />
-                <span>Upgrade to Unlimited Pro</span>
+                {checkoutLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                    <span>Preparing Secure Paddle Checkout...</span>
+                  </>
+                ) : (
+                  <>
+                    <Zap className="w-4 h-4 fill-amber-300 text-amber-300 animate-pulse" />
+                    <span>Upgrade to Unlimited Pro</span>
+                  </>
+                )}
               </Button>
+
+              {customerPortalUrl && (
+                <div className="text-center pt-2">
+                  <button
+                    onClick={handleOpenCustomerPortal}
+                    disabled={portalLoading}
+                    className="text-xs text-slate-400 hover:text-white transition-colors underline cursor-pointer bg-transparent border-none p-0"
+                  >
+                    {portalLoading ? 'Accessing Billing Portal...' : 'Manage Past Subscriptions & Invoices'}
+                  </button>
+                </div>
+              )}
 
               {/* <div className="text-[10px] text-slate-400 font-semibold mt-3 text-center leading-relaxed pt-2 border-t border-slate-700/50">
                 💡 Are you a Tech-savvy? Switch your database connection to your own private API keys under the{' '}

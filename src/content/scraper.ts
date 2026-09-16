@@ -22,6 +22,15 @@ export interface PageContext {
   formHeading?: string;
 }
 
+export interface FormSnapshotItem {
+  id: string;
+  type: string;
+  value: string;
+  checked?: boolean;
+  selectedIndex?: number;
+  textContent?: string;
+}
+
 export class FormScraper {
   /**
    * Recursively finds all form-associated elements, even those inside Shadow DOMs.
@@ -287,6 +296,122 @@ export class FormScraper {
       formHeading: formHeading || undefined
     };
   }
+
+  /**
+   * Captures the pre-fill state of all form fields on the page.
+   */
+  static snapshotForms(): FormSnapshotItem[] {
+    const rawElements = this.findElementsRecursively(document);
+    const uniqueElements = Array.from(new Set(rawElements));
+    const snapshots: FormSnapshotItem[] = [];
+
+    uniqueElements.forEach((el, index) => {
+      let type = el.getAttribute('type') || 'text';
+      if (el instanceof HTMLTextAreaElement) type = 'textarea';
+      if (el instanceof HTMLSelectElement) type = 'select';
+      if (el.getAttribute('contenteditable') === 'true') type = 'contenteditable';
+
+      if (type === 'hidden' || type === 'submit' || type === 'button' || type === 'reset') return;
+
+      let id = el.getAttribute('data-autofill-id');
+      if (!id) {
+        id = el.id || el.getAttribute('name') || `${type}-field-${index}`;
+        el.setAttribute('data-autofill-id', id);
+      }
+
+      if (el.getAttribute('contenteditable') === 'true') {
+        snapshots.push({
+          id,
+          type,
+          value: el.textContent || '',
+          textContent: el.textContent || ''
+        });
+      } else if (el instanceof HTMLInputElement && (type === 'checkbox' || type === 'radio')) {
+        snapshots.push({
+          id,
+          type,
+          value: el.value,
+          checked: el.checked
+        });
+      } else if (el instanceof HTMLSelectElement) {
+        snapshots.push({
+          id,
+          type,
+          value: el.value,
+          selectedIndex: el.selectedIndex
+        });
+      } else if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+        snapshots.push({
+          id,
+          type,
+          value: el.value
+        });
+      }
+    });
+
+    return snapshots;
+  }
+
+  /**
+   * Restores a previously captured form snapshot, resetting all inputs.
+   */
+  static restoreFormSnapshot(snapshots: FormSnapshotItem[]): number {
+    let restoredCount = 0;
+    for (const item of snapshots) {
+      let el = document.querySelector(`[data-autofill-id="${CSS.escape(item.id)}"]`) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+      if (!el) {
+        el = document.getElementById(item.id) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+      }
+      if (!el) {
+        try {
+          el = document.querySelector(`[name="${CSS.escape(item.id)}"]`) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+        } catch {
+          // Ignored
+        }
+      }
+      if (!el) continue;
+
+      if (item.type === 'contenteditable') {
+        el.textContent = item.textContent || '';
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        restoredCount++;
+      } else if (el instanceof HTMLInputElement && (item.type === 'checkbox' || item.type === 'radio')) {
+        const nativeCheckedSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'checked')?.set;
+        if (nativeCheckedSetter) {
+          nativeCheckedSetter.call(el, !!item.checked);
+        } else {
+          el.checked = !!item.checked;
+        }
+        el.dispatchEvent(new Event('click', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        restoredCount++;
+      } else if (el instanceof HTMLSelectElement) {
+        if (typeof item.selectedIndex === 'number' && item.selectedIndex >= 0) {
+          el.selectedIndex = item.selectedIndex;
+        } else {
+          el.value = item.value;
+        }
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        restoredCount++;
+      } else if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+        el.dispatchEvent(new Event('focus', { bubbles: true }));
+        const prototype = el instanceof HTMLInputElement ? window.HTMLInputElement.prototype : window.HTMLTextAreaElement.prototype;
+        const nativeValueSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+        if (nativeValueSetter) {
+          nativeValueSetter.call(el, item.value);
+        } else {
+          el.value = item.value;
+        }
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        el.dispatchEvent(new Event('blur', { bubbles: true }));
+        restoredCount++;
+      }
+    }
+    return restoredCount;
+  }
 }
 
 /**
@@ -400,6 +525,9 @@ export const injectValue = (fieldId: string, value: string) => {
   } else if (isInput || isTextArea) {
     const input = el as HTMLInputElement | HTMLTextAreaElement;
     
+    // Dispatch focus first so state machines and touched state activate
+    input.dispatchEvent(new Event('focus', { bubbles: true }));
+
     // React / Vue input value tracker bypass
     const prototype = isInput ? window.HTMLInputElement.prototype : window.HTMLTextAreaElement.prototype;
     const nativeValueSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
@@ -412,5 +540,6 @@ export const injectValue = (fieldId: string, value: string) => {
     
     input.dispatchEvent(new Event('input', { bubbles: true }));
     input.dispatchEvent(new Event('change', { bubbles: true }));
+    input.dispatchEvent(new Event('blur', { bubbles: true }));
   }
 };

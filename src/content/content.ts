@@ -1,4 +1,6 @@
-import { FormScraper, injectValue } from './scraper';
+import { FormScraper, injectValue, type FormSnapshotItem } from './scraper';
+import { type TestRunReportData, generateReportMarkdown, copyReportToClipboard } from '../lib/exportReport';
+import { getDomainPrompt, saveDomainPrompt, normalizeDomain } from '../lib/domainPromptManager';
 import contentCss from './content.css?inline';
 import './global.css';
 
@@ -29,6 +31,14 @@ class MagicCommandDock {
   private isMinimized: boolean = true;
   private lastMinimizedState: boolean | null = null;
   private lastFieldsCount: number | null = null;
+  private lastUsageCount: number | null = null;
+  private lastUserPlan: string | null = null;
+  private lastAuthToken: string | null = null;
+  private lastAiProvider: string | null = null;
+  private lastSnapshot: FormSnapshotItem[] | null = null;
+  private lastSnapshotState: boolean = false;
+  private qaFlavor: string = 'all';
+  private lastQaFlavor: string | null = null;
   private observer: MutationObserver | null = null;
   private usageCount: number = 0;
   private userPlan: string = 'Free Tier';
@@ -36,6 +46,7 @@ class MagicCommandDock {
   private aiProvider: string = 'cloud';
   private hasProfile: boolean = false;
   private isLoading: boolean = false;
+  private qaDailyCount: number = 0;
   private cleanupListeners: (() => void) | null = null;
 
   constructor() {
@@ -52,7 +63,9 @@ class MagicCommandDock {
       'usageCount',
       'userPlan',
       'authToken',
-      'aiProvider'
+      'aiProvider',
+      'qaDailyCount',
+      'qaLastDate'
     ], (result: Record<string, string | number | boolean | undefined>) => {
       if (!isContextValid()) return;
 
@@ -60,6 +73,14 @@ class MagicCommandDock {
       this.userPlan = result.userPlan as string || 'Free Tier';
       this.authToken = result.authToken as string || '';
       this.aiProvider = result.aiProvider as string || 'cloud';
+
+      const today = new Date().toISOString().slice(0, 10);
+      let qCount = typeof result.qaDailyCount === 'number' ? result.qaDailyCount : 0;
+      if (result.qaLastDate !== today) {
+        qCount = 0;
+        chrome.storage.local.set({ qaDailyCount: 0, qaLastDate: today });
+      }
+      this.qaDailyCount = qCount;
 
       const enabled = result.enableFloatingDock !== false;
       if (!enabled) {
@@ -72,6 +93,11 @@ class MagicCommandDock {
       this.setupListeners();
       this.setupObserver();
 
+      // Silent background sync for latest quota
+      if (this.aiProvider === 'cloud') {
+        chrome.runtime.sendMessage({ action: 'sync_usage' });
+      }
+
       this.isMinimized = result.isMinimized !== undefined ? !!result.isMinimized : true;
       this.hasProfile = !!(result.profileFirstName || result.profileLastName || result.profileEmail);
       if (this.hasProfile) {
@@ -79,6 +105,23 @@ class MagicCommandDock {
       } else {
         this.currentPersona = 'default';
       }
+
+      if (result.lastQaFlavor) {
+        this.qaFlavor = result.lastQaFlavor as string;
+      }
+
+      const domain = normalizeDomain(window.location.hostname);
+      if (domain) {
+        getDomainPrompt(domain).then((savedPrompt) => {
+          if (savedPrompt) {
+            this.customPrompts['default'] = savedPrompt;
+            this.customPrompts['profile'] = this.customPrompts['profile'] || savedPrompt;
+            this.customPrompts['qa'] = this.customPrompts['qa'] || savedPrompt;
+            this.customPrompts['b2b'] = this.customPrompts['b2b'] || savedPrompt;
+          }
+        });
+      }
+
       this.updateDockState();
     });
   }
@@ -169,21 +212,96 @@ class MagicCommandDock {
     shadowRoot.appendChild(styleEl);
   }
 
-  private getQuotaText(): string {
+  private getQuotaDetails() {
     if (this.aiProvider !== 'cloud' && this.aiProvider !== 'local') {
-      return 'API Key: Unlimited';
+      return {
+        badgeText: 'BYOK',
+        tierName: 'Private API Key',
+        desc: 'Unlimited fills',
+        footerText: 'API Key: Unlimited',
+        isLimitReached: false,
+        isCloudLimited: false,
+        percentUsed: 0,
+        dotColor: 'green'
+      };
     }
+
     if (this.aiProvider === 'local') {
-      return 'Local AI: Unlimited';
+      return {
+        badgeText: 'Local AI',
+        tierName: 'Local Gemini Nano',
+        desc: 'Unlimited offline fills',
+        footerText: 'Local AI: Unlimited',
+        isLimitReached: false,
+        isCloudLimited: false,
+        percentUsed: 0,
+        dotColor: 'green'
+      };
     }
-    // Cloud modes
+
+    // Cloud: Pro Plan
+    if (this.authToken && this.userPlan === 'Pro Plan') {
+      return {
+        badgeText: 'Pro',
+        tierName: 'Autofill AI Pro',
+        desc: 'Unlimited fills',
+        footerText: 'Pro: Unlimited',
+        isLimitReached: false,
+        isCloudLimited: false,
+        percentUsed: 0,
+        dotColor: 'green'
+      };
+    }
+
+    // Cloud: Free Tier (50 fills/month)
     if (this.authToken) {
-      if (this.userPlan === 'Pro Plan') {
-        return 'Pro: Unlimited';
-      }
-      return `Fills: ${Math.max(0, 50 - this.usageCount)}/50 left`;
+      const remaining = Math.max(0, 50 - this.usageCount);
+      const isLimitReached = this.usageCount >= 50;
+      const percentUsed = Math.min(100, Math.round((this.usageCount / 50) * 100));
+      const dotColor = isLimitReached ? 'red' : remaining <= 5 ? 'amber' : 'green';
+
+      return {
+        badgeText: isLimitReached ? '0/50 Limit' : `${remaining}/50 left`,
+        tierName: 'Free Tier',
+        desc: `${remaining}/50 monthly fills left`,
+        footerText: isLimitReached ? '0/50 left • Upgrade to Pro' : `${remaining}/50 left • Upgrade to Pro`,
+        isLimitReached,
+        isCloudLimited: true,
+        percentUsed,
+        dotColor,
+        warningText: isLimitReached
+          ? 'Monthly limit reached (50/50). Upgrade to Pro for unlimited fills.'
+          : remaining <= 5
+          ? `Only ${remaining} monthly fills left. Upgrade to Pro for unlimited.`
+          : undefined,
+        ctaText: 'Upgrade to Pro →',
+        ctaAction: 'upgrade' as const
+      };
     }
-    return 'Autofill AI: Auth Required';
+
+    // Cloud: Guest / Anonymous (10 fills total)
+    const remaining = Math.max(0, 10 - this.usageCount);
+    const isLimitReached = this.usageCount >= 10;
+    const percentUsed = Math.min(100, Math.round((this.usageCount / 10) * 100));
+    const dotColor = isLimitReached ? 'red' : remaining <= 3 ? 'amber' : 'green';
+
+    return {
+      badgeText: isLimitReached ? '0/10 Limit' : `${remaining}/10 left`,
+      tierName: 'Guest Mode',
+      desc: `${remaining}/10 free fills left`,
+      footerText: isLimitReached ? '0/10 left • Sign up for 50' : `${remaining}/10 left • Sign up for 50`,
+      isLimitReached,
+      isCloudLimited: true,
+      percentUsed,
+      dotColor,
+      warningText: isLimitReached
+        ? 'Guest limit reached (10/10). Sign up for free to unlock 50 fills/month!'
+        : remaining <= 3
+        ? `Only ${remaining} guest fills left. Sign up to unlock 50 free fills/month!`
+        : undefined,
+      ctaText: 'Unlock 50 Free Fills →',
+      ctaAction: 'signup' as const
+    };
   }
 
   private updateDockState() {
@@ -205,147 +323,39 @@ class MagicCommandDock {
     }
     if (host) host.style.display = 'block';
 
-    // Only repaint/rebuild the DOM if minimized state or form field count has actually changed
-    if (this.isMinimized === this.lastMinimizedState && activeFields === this.lastFieldsCount) {
+    const quota = this.getQuotaDetails();
+    const hasUndo = !!(this.lastSnapshot && this.lastSnapshot.length > 0);
+
+    // Only repaint/rebuild the DOM if state has actually changed
+    if (
+      this.isMinimized === this.lastMinimizedState &&
+      activeFields === this.lastFieldsCount &&
+      this.usageCount === this.lastUsageCount &&
+      this.userPlan === this.lastUserPlan &&
+      this.authToken === this.lastAuthToken &&
+      this.aiProvider === this.lastAiProvider &&
+      hasUndo === this.lastSnapshotState &&
+      this.qaFlavor === this.lastQaFlavor
+    ) {
       return;
     }
 
     this.lastMinimizedState = this.isMinimized;
     this.lastFieldsCount = activeFields;
+    this.lastUsageCount = this.usageCount;
+    this.lastUserPlan = this.userPlan;
+    this.lastAuthToken = this.authToken;
+    this.lastAiProvider = this.aiProvider;
+    this.lastSnapshotState = hasUndo;
+    this.lastQaFlavor = this.qaFlavor;
+
+    const logoUrl = chrome.runtime.getURL('icon-128.png');
 
     if (this.isMinimized) {
       this.dockContainer.innerHTML = `
-        <div class="af-dock-bubble" title="Expand AutoFill AI [Alt+P]">
-          <svg xmlns="http://www.w3.org/2000/svg" width="30" height="29" viewBox="0 0 48 46" fill="none">
-            <path fill="#863bff" d="M25.946 44.938c-.664.845-2.021.375-2.021-.698V33.937a2.26 2.26 0 0 0-2.262-2.262H10.287c-.92 0-1.456-1.04-.92-1.788l7.48-10.471c1.07-1.497 0-3.578-1.842-3.578H1.237c-.92 0-1.456-1.04-.92-1.788L10.013.474c.214-.297.556-.474.92-.474h28.894c.92 0 1.456 1.04.92 1.788l-7.48 10.471c-1.07 1.498 0 3.579 1.842 3.579h11.377c.943 0 1.473 1.088.89 1.83L25.947 44.94z"/>
-            <mask id="af-bubble-mask-a" width="48" height="46" x="0" y="0" maskUnits="userSpaceOnUse" style="mask-type:alpha">
-              <path fill="#000" d="M25.842 44.938c-.664.844-2.021.375-2.021-.698V33.937a2.26 2.26 0 0 0-2.262-2.262H10.183c-.92 0-1.456-1.04-.92-1.788l7.48-10.471c1.07-1.498 0-3.579-1.842-3.579H1.133c-.92 0-1.456-1.04-.92-1.787L9.91.473c.214-.297.556-.474.92-.474h28.894c.92 0 1.456 1.04.92 1.788l-7.48 10.471c-1.07 1.498 0 3.578 1.842 3.578h11.377c.943 0 1.473 1.088.89 1.832L25.843 44.94z"/>
-            </mask>
-            <g mask="url(#af-bubble-mask-a)">
-              <g filter="url(#af-bubble-filter-b)">
-                <ellipse cx="5.508" cy="14.704" fill="#ede6ff" rx="5.508" ry="14.704" transform="matrix(.00324 1 1 -.00324 -4.47 31.516)"/>
-              </g>
-              <g filter="url(#af-bubble-filter-c)">
-                <ellipse cx="10.399" cy="29.851" fill="#ede6ff" rx="10.399" ry="29.851" transform="matrix(.00324 1 1 -.00324 -39.328 7.883)"/>
-              </g>
-              <g filter="url(#af-bubble-filter-d)">
-                <ellipse cx="5.508" cy="30.487" fill="#7e14ff" rx="5.508" ry="30.487" transform="rotate(89.814 -25.913 -14.639)scale(1 -1)"/>
-              </g>
-              <g filter="url(#af-bubble-filter-e)">
-                <ellipse cx="5.508" cy="30.599" fill="#7e14ff" rx="5.508" ry="30.599" transform="rotate(89.814 -32.644 -3.334)scale(1 -1)"/>
-              </g>
-              <g filter="url(#af-bubble-filter-f)">
-                <ellipse cx="5.508" cy="30.599" fill="#7e14ff" rx="5.508" ry="30.599" transform="matrix(.00324 1 1 -.00324 -34.34 30.47)"/>
-              </g>
-              <g filter="url(#af-bubble-filter-g)">
-                <ellipse cx="14.072" cy="22.078" fill="#ede6ff" rx="14.072" ry="22.078" transform="rotate(93.35 24.506 48.493)scale(-1 1)"/>
-              </g>
-              <g filter="url(#af-bubble-filter-h)">
-                <ellipse cx="3.47" cy="21.501" fill="#7e14ff" rx="3.47" ry="21.501" transform="rotate(89.009 28.708 47.59)scale(-1 1)"/>
-              </g>
-              <g filter="url(#af-bubble-filter-i)">
-                <ellipse cx="3.47" cy="21.501" fill="#7e14ff" rx="3.47" ry="21.501" transform="rotate(89.009 28.708 47.59)scale(-1 1)"/>
-              </g>
-              <g filter="url(#af-bubble-filter-j)">
-                <ellipse cx=".387" cy="8.972" fill="#7e14ff" rx="4.407" ry="29.108" transform="rotate(39.51 .387 8.972)"/>
-              </g>
-              <g filter="url(#af-bubble-filter-k)">
-                <ellipse cx="47.523" cy="-6.092" fill="#7e14ff" rx="4.407" ry="29.108" transform="rotate(37.892 47.523 -6.092)"/>
-              </g>
-              <g filter="url(#af-bubble-filter-l)">
-                <ellipse cx="41.412" cy="6.333" fill="#47bfff" rx="5.971" ry="9.665" transform="rotate(37.892 41.412 6.333)"/>
-              </g>
-              <g filter="url(#af-bubble-filter-m)">
-                <ellipse cx="-1.879" cy="38.332" fill="#7e14ff" rx="4.407" ry="29.108" transform="rotate(37.892 -1.88 38.332)"/>
-              </g>
-              <g filter="url(#af-bubble-filter-n)">
-                <ellipse cx="-1.879" cy="38.332" fill="#7e14ff" rx="4.407" ry="29.108" transform="rotate(37.892 -1.88 38.332)"/>
-              </g>
-              <g filter="url(#af-bubble-filter-o)">
-                <ellipse cx="35.651" cy="29.907" fill="#7e14ff" rx="4.407" ry="29.108" transform="rotate(37.892 35.651 29.907)"/>
-              </g>
-              <g filter="url(#af-bubble-filter-p)">
-                <ellipse cx="38.418" cy="32.4" fill="#47bfff" rx="5.971" ry="15.297" transform="rotate(37.892 38.418 32.4)"/>
-              </g>
-            </g>
-            <defs>
-              <filter id="af-bubble-filter-b" width="60.045" height="41.654" x="-19.77" y="16.149" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
-                <feFlood flood-opacity="0" result="BackgroundImageFix"/>
-                <feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
-                <feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="7.659"/>
-              </filter>
-              <filter id="af-bubble-filter-c" width="90.34" height="51.437" x="-54.613" y="-7.533" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
-                <feFlood flood-opacity="0" result="BackgroundImageFix"/>
-                <feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
-                <feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="7.659"/>
-              </filter>
-              <filter id="af-bubble-filter-d" width="79.355" height="29.4" x="-49.64" y="2.03" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
-                <feFlood flood-opacity="0" result="BackgroundImageFix"/>
-                <feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
-                <feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="4.596"/>
-              </filter>
-              <filter id="af-bubble-filter-e" width="79.579" height="29.4" x="-45.045" y="20.029" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
-                <feFlood flood-opacity="0" result="BackgroundImageFix"/>
-                <feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
-                <feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="4.596"/>
-              </filter>
-              <filter id="af-bubble-filter-f" width="79.579" height="29.4" x="-43.513" y="21.178" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
-                <feFlood flood-opacity="0" result="BackgroundImageFix"/>
-                <feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
-                <feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="4.596"/>
-              </filter>
-              <filter id="af-bubble-filter-g" width="74.749" height="58.852" x="15.756" y="-17.901" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
-                <feFlood flood-opacity="0" result="BackgroundImageFix"/>
-                <feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
-                <feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="7.659"/>
-              </filter>
-              <filter id="af-bubble-filter-h" width="61.377" height="25.362" x="23.548" y="2.284" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
-                <feFlood flood-opacity="0" result="BackgroundImageFix"/>
-                <feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
-                <feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="4.596"/>
-              </filter>
-              <filter id="af-bubble-filter-i" width="61.377" height="25.362" x="23.548" y="2.284" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
-                <feFlood flood-opacity="0" result="BackgroundImageFix"/>
-                <feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
-                <feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="4.596"/>
-              </filter>
-              <filter id="af-bubble-filter-j" width="56.045" height="63.649" x="-27.636" y="-22.853" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
-                <feFlood flood-opacity="0" result="BackgroundImageFix"/>
-                <feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
-                <feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="4.596"/>
-              </filter>
-              <filter id="af-bubble-filter-k" width="54.814" height="64.646" x="20.116" y="-38.415" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
-                <feFlood flood-opacity="0" result="BackgroundImageFix"/>
-                <feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
-                <feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="4.596"/>
-              </filter>
-              <filter id="af-bubble-filter-l" width="33.541" height="35.313" x="24.641" y="-11.323" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
-                <feFlood flood-opacity="0" result="BackgroundImageFix"/>
-                <feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
-                <feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="4.596"/>
-              </filter>
-              <filter id="af-bubble-filter-m" width="54.814" height="64.646" x="-29.286" y="6.009" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
-                <feFlood flood-opacity="0" result="BackgroundImageFix"/>
-                <feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
-                <feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="4.596"/>
-              </filter>
-              <filter id="af-bubble-filter-n" width="54.814" height="64.646" x="-29.286" y="6.009" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
-                <feFlood flood-opacity="0" result="BackgroundImageFix"/>
-                <feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
-                <feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="4.596"/>
-              </filter>
-              <filter id="af-bubble-filter-o" width="54.814" height="64.646" x="8.244" y="-2.416" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
-                <feFlood flood-opacity="0" result="BackgroundImageFix"/>
-                <feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
-                <feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="4.596"/>
-              </filter>
-              <filter id="af-bubble-filter-p" width="39.409" height="43.623" x="18.713" y="10.588" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
-                <feFlood flood-opacity="0" result="BackgroundImageFix"/>
-                <feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
-                <feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="4.596"/>
-              </filter>
-            </defs>
-          </svg>
+        <div class="af-dock-bubble" title="${quota.isLimitReached ? 'Filli AI (Limit Reached - Click to Open)' : `Filli AI (${quota.desc}) [Alt+P]`}">
+          ${quota.isLimitReached ? '<span class="af-bubble-limit-dot" title="Limit Reached">!</span>' : ''}
+          <img src="${logoUrl}" alt="Filli AI" class="af-dock-bubble-logo" />
         </div>
       `;
 
@@ -356,10 +366,12 @@ class MagicCommandDock {
         this.updateDockState();
       });
     } else {
-      const isLimitReached = this.aiProvider === 'cloud' && (
+      const isBypass = this.userPlan === 'Pro Plan' || this.aiProvider !== 'cloud';
+      const isLimitReached = !isBypass && this.aiProvider === 'cloud' && (
         (!this.authToken && this.usageCount >= 10) ||
         (this.authToken && this.userPlan === 'Free Tier' && this.usageCount >= 50)
       );
+      const isQaLimitReached = !isBypass && this.currentPersona === 'qa' && this.qaDailyCount >= 5;
 
       let btnText = 'Magically Fill Form';
       let btnClass = 'af-btn-primary';
@@ -370,7 +382,16 @@ class MagicCommandDock {
         </svg>
       `;
 
-      if (isLimitReached) {
+      if (isQaLimitReached) {
+        btnClass += ' limit-reached';
+        btnText = 'Daily QA Limit Reached (5/5)';
+        btnIcon = `
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+          </svg>
+        `;
+      } else if (isLimitReached && this.currentPersona !== 'qa') {
         btnClass += ' limit-reached';
         btnText = (this.aiProvider === 'cloud' && !this.authToken)
           ? 'Limit Reached: Sign Up for 50 Free Fills'
@@ -384,7 +405,8 @@ class MagicCommandDock {
       } else if (this.currentPersona === 'profile' && !this.hasProfile) {
         btnText = 'Configure Profile Card';
       } else if (this.currentPersona === 'qa') {
-        btnText = '⚡ Fill QA Edge Cases';
+        const remaining = Math.max(0, 5 - this.qaDailyCount);
+        btnText = isBypass ? '⚡ Fill QA Edge Cases' : `⚡ Fill QA Edge Cases (${remaining} left today)`;
         btnClass += ' af-btn-qa';
         btnIcon = `
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -399,6 +421,9 @@ class MagicCommandDock {
             <path d="M18 18c2 0 3-1 3-3"></path>
           </svg>
         `;
+      } else if (this.currentPersona === 'b2b') {
+        btnText = 'Fill B2B Corp Identity';
+        btnClass += ' af-btn-primary';
       }
 
       this.dockContainer.innerHTML = `
@@ -407,147 +432,44 @@ class MagicCommandDock {
           <div class="af-dock-header">
             <div class="af-dock-brand">
               <div class="af-dock-icon">
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="19" viewBox="0 0 48 46" fill="none">
-                  <path fill="#863bff" d="M25.946 44.938c-.664.845-2.021.375-2.021-.698V33.937a2.26 2.26 0 0 0-2.262-2.262H10.287c-.92 0-1.456-1.04-.92-1.788l7.48-10.471c1.07-1.497 0-3.578-1.842-3.578H1.237c-.92 0-1.456-1.04-.92-1.788L10.013.474c.214-.297.556-.474.92-.474h28.894c.92 0 1.456 1.04.92 1.788l-7.48 10.471c-1.07 1.498 0 3.579 1.842 3.579h11.377c.943 0 1.473 1.088.89 1.83L25.947 44.94z"/>
-                  <mask id="af-hdr-mask-a" width="48" height="46" x="0" y="0" maskUnits="userSpaceOnUse" style="mask-type:alpha">
-                    <path fill="#000" d="M25.842 44.938c-.664.844-2.021.375-2.021-.698V33.937a2.26 2.26 0 0 0-2.262-2.262H10.183c-.92 0-1.456-1.04-.92-1.788l7.48-10.471c1.07-1.498 0-3.579-1.842-3.579H1.133c-.92 0-1.456-1.04-.92-1.787L9.91.473c.214-.297.556-.474.92-.474h28.894c.92 0 1.456 1.04.92 1.788l-7.48 10.471c-1.07 1.498 0 3.578 1.842 3.578h11.377c.943 0 1.473 1.088.89 1.832L25.843 44.94z"/>
-                  </mask>
-                  <g mask="url(#af-hdr-mask-a)">
-                    <g filter="url(#af-hdr-filter-b)">
-                      <ellipse cx="5.508" cy="14.704" fill="#ede6ff" rx="5.508" ry="14.704" transform="matrix(.00324 1 1 -.00324 -4.47 31.516)"/>
-                    </g>
-                    <g filter="url(#af-hdr-filter-c)">
-                      <ellipse cx="10.399" cy="29.851" fill="#ede6ff" rx="10.399" ry="29.851" transform="matrix(.00324 1 1 -.00324 -39.328 7.883)"/>
-                    </g>
-                    <g filter="url(#af-hdr-filter-d)">
-                      <ellipse cx="5.508" cy="30.487" fill="#7e14ff" rx="5.508" ry="30.487" transform="rotate(89.814 -25.913 -14.639)scale(1 -1)"/>
-                    </g>
-                    <g filter="url(#af-hdr-filter-e)">
-                      <ellipse cx="5.508" cy="30.599" fill="#7e14ff" rx="5.508" ry="30.599" transform="rotate(89.814 -32.644 -3.334)scale(1 -1)"/>
-                    </g>
-                    <g filter="url(#af-hdr-filter-f)">
-                      <ellipse cx="5.508" cy="30.599" fill="#7e14ff" rx="5.508" ry="30.599" transform="matrix(.00324 1 1 -.00324 -34.34 30.47)"/>
-                    </g>
-                    <g filter="url(#af-hdr-filter-g)">
-                      <ellipse cx="14.072" cy="22.078" fill="#ede6ff" rx="14.072" ry="22.078" transform="rotate(93.35 24.506 48.493)scale(-1 1)"/>
-                    </g>
-                    <g filter="url(#af-hdr-filter-h)">
-                      <ellipse cx="3.47" cy="21.501" fill="#7e14ff" rx="3.47" ry="21.501" transform="rotate(89.009 28.708 47.59)scale(-1 1)"/>
-                    </g>
-                    <g filter="url(#af-hdr-filter-i)">
-                      <ellipse cx="3.47" cy="21.501" fill="#7e14ff" rx="3.47" ry="21.501" transform="rotate(89.009 28.708 47.59)scale(-1 1)"/>
-                    </g>
-                    <g filter="url(#af-hdr-filter-j)">
-                      <ellipse cx=".387" cy="8.972" fill="#7e14ff" rx="4.407" ry="29.108" transform="rotate(39.51 .387 8.972)"/>
-                    </g>
-                    <g filter="url(#af-hdr-filter-k)">
-                      <ellipse cx="47.523" cy="-6.092" fill="#7e14ff" rx="4.407" ry="29.108" transform="rotate(37.892 47.523 -6.092)"/>
-                    </g>
-                    <g filter="url(#af-hdr-filter-l)">
-                      <ellipse cx="41.412" cy="6.333" fill="#47bfff" rx="5.971" ry="9.665" transform="rotate(37.892 41.412 6.333)"/>
-                    </g>
-                    <g filter="url(#af-hdr-filter-m)">
-                      <ellipse cx="-1.879" cy="38.332" fill="#7e14ff" rx="4.407" ry="29.108" transform="rotate(37.892 -1.88 38.332)"/>
-                    </g>
-                    <g filter="url(#af-hdr-filter-n)">
-                      <ellipse cx="-1.879" cy="38.332" fill="#7e14ff" rx="4.407" ry="29.108" transform="rotate(37.892 -1.88 38.332)"/>
-                    </g>
-                    <g filter="url(#af-hdr-filter-o)">
-                      <ellipse cx="35.651" cy="29.907" fill="#7e14ff" rx="4.407" ry="29.108" transform="rotate(37.892 35.651 29.907)"/>
-                    </g>
-                    <g filter="url(#af-hdr-filter-p)">
-                      <ellipse cx="38.418" cy="32.4" fill="#47bfff" rx="5.971" ry="15.297" transform="rotate(37.892 38.418 32.4)"/>
-                    </g>
-                  </g>
-                  <defs>
-                    <filter id="af-hdr-filter-b" width="60.045" height="41.654" x="-19.77" y="16.149" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
-                      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
-                      <feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
-                      <feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="7.659"/>
-                    </filter>
-                    <filter id="af-hdr-filter-c" width="90.34" height="51.437" x="-54.613" y="-7.533" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
-                      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
-                      <feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
-                      <feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="7.659"/>
-                    </filter>
-                    <filter id="af-hdr-filter-d" width="79.355" height="29.4" x="-49.64" y="2.03" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
-                      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
-                      <feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
-                      <feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="4.596"/>
-                    </filter>
-                    <filter id="af-hdr-filter-e" width="79.579" height="29.4" x="-45.045" y="20.029" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
-                      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
-                      <feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
-                      <feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="4.596"/>
-                    </filter>
-                    <filter id="af-hdr-filter-f" width="79.579" height="29.4" x="-43.513" y="21.178" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
-                      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
-                      <feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
-                      <feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="4.596"/>
-                    </filter>
-                    <filter id="af-hdr-filter-g" width="74.749" height="58.852" x="15.756" y="-17.901" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
-                      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
-                      <feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
-                      <feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="7.659"/>
-                    </filter>
-                    <filter id="af-hdr-filter-h" width="61.377" height="25.362" x="23.548" y="2.284" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
-                      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
-                      <feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
-                      <feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="4.596"/>
-                    </filter>
-                    <filter id="af-hdr-filter-i" width="61.377" height="25.362" x="23.548" y="2.284" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
-                      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
-                      <feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
-                      <feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="4.596"/>
-                    </filter>
-                    <filter id="af-hdr-filter-j" width="56.045" height="63.649" x="-27.636" y="-22.853" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
-                      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
-                      <feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
-                      <feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="4.596"/>
-                    </filter>
-                    <filter id="af-hdr-filter-k" width="54.814" height="64.646" x="20.116" y="-38.415" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
-                      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
-                      <feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
-                      <feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="4.596"/>
-                    </filter>
-                    <filter id="af-hdr-filter-l" width="33.541" height="35.313" x="24.641" y="-11.323" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
-                      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
-                      <feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
-                      <feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="4.596"/>
-                    </filter>
-                    <filter id="af-hdr-filter-m" width="54.814" height="64.646" x="-29.286" y="6.009" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
-                      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
-                      <feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
-                      <feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="4.596"/>
-                    </filter>
-                    <filter id="af-hdr-filter-n" width="54.814" height="64.646" x="-29.286" y="6.009" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
-                      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
-                      <feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
-                      <feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="4.596"/>
-                    </filter>
-                    <filter id="af-hdr-filter-o" width="54.814" height="64.646" x="8.244" y="-2.416" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
-                      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
-                      <feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
-                      <feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="4.596"/>
-                    </filter>
-                    <filter id="af-hdr-filter-p" width="39.409" height="43.623" x="18.713" y="10.588" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
-                      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
-                      <feBlend in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
-                      <feGaussianBlur result="effect1_foregroundBlur_2002_17158" stdDeviation="4.596"/>
-                    </filter>
-                  </defs>
-                </svg>
+                <img src="${logoUrl}" alt="Filli AI" class="af-dock-header-logo" />
               </div>
-              <span class="af-dock-title">AutoFill AI</span>
+              <span class="af-dock-title">Filli AI</span>
             </div>
-            <div style="display: flex; align-items: center; gap: 8px;">
+            <div class="af-dock-header-right">
               <span class="af-dock-status">${activeFields} fields</span>
+              <button class="af-dock-quota-pill ${quota.isLimitReached ? 'limited' : ''}" id="af-quota-pill-btn" title="Plan: ${quota.tierName} • ${quota.desc}. Click to open Settings.">
+                <span class="af-quota-dot ${quota.dotColor}"></span>
+                <span>${quota.badgeText}</span>
+              </button>
               <button class="af-dock-minimize" title="Minimize Dock [Alt+P]">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                   <line x1="5" y1="12" x2="19" y2="12"></line>
                 </svg>
               </button>
             </div>
+          </div>
+
+          <!-- Quota & Usage Status Card -->
+          <div class="af-quota-card ${quota.isLimitReached ? 'limited' : ''}">
+            <div class="af-quota-card-top">
+              <div class="af-quota-tier-badge">
+                <span class="af-tier-name">${quota.tierName}</span>
+                ${quota.isLimitReached ? '<span class="af-limited-tag">Limit Reached</span>' : ''}
+              </div>
+              <span class="af-quota-stat ${quota.isLimitReached ? 'limited' : ''}">${quota.desc}</span>
+            </div>
+            ${quota.isCloudLimited ? `
+            <div class="af-quota-progress-track">
+              <div class="af-quota-progress-bar ${quota.isLimitReached ? 'exhausted' : quota.percentUsed >= 70 ? 'warning' : ''}" style="width: ${quota.percentUsed}%"></div>
+            </div>
+            ` : ''}
+            ${quota.warningText ? `
+            <div class="af-quota-alert">
+              <span class="af-quota-alert-msg">${quota.warningText}</span>
+              <button class="af-quota-cta-btn" id="af-quota-cta-btn">${quota.ctaText}</button>
+            </div>
+            ` : ''}
           </div>
 
           <!-- Persona Grid -->
@@ -562,6 +484,21 @@ class MagicCommandDock {
               <button class="af-persona-tab ${this.currentPersona === 'qa' ? 'active' : ''}" data-persona="qa">QA Test</button>
               <button class="af-persona-tab ${this.currentPersona === 'b2b' ? 'active' : ''}" data-persona="b2b">B2B Corp</button>
             </div>
+            ${this.currentPersona === 'qa' ? `
+            <div class="af-qa-flavor-selector">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span class="af-section-label" style="font-size: 8px; color: #b45309;">Test Fuzz Strategy</span>
+                <span class="af-section-label" style="font-size: 8px; color: #64748b;">${this.userPlan === 'Pro Plan' || this.aiProvider !== 'cloud' ? 'Unlimited' : `${Math.max(0, 5 - this.qaDailyCount)} left today`}</span>
+              </div>
+              <div class="af-qa-flavor-pills">
+                <button class="af-qa-flavor-pill ${this.qaFlavor === 'all' ? 'active' : ''}" data-flavor="all">Mix All</button>
+                <button class="af-qa-flavor-pill ${this.qaFlavor === 'boundary' ? 'active' : ''}" data-flavor="boundary">Boundary</button>
+                <button class="af-qa-flavor-pill ${this.qaFlavor === 'security' ? 'active' : ''}" data-flavor="security">XSS/SQLi</button>
+                <button class="af-qa-flavor-pill ${this.qaFlavor === 'realistic' ? 'active' : ''}" data-flavor="realistic">Realistic</button>
+                <button class="af-qa-flavor-pill ${this.qaFlavor === 'appsec_pro' ? 'active' : ''}" data-flavor="appsec_pro" title="OWASP Top 10 Suite (Pro / BYOK)">⚡ AppSec (Pro)</button>
+              </div>
+            </div>
+            ` : ''}
           </div>
 
           <!-- Custom Instruction Toggle -->
@@ -576,6 +513,12 @@ class MagicCommandDock {
                 placeholder="e.g. A developer from Seattle named Jane who loves coding..."
                 rows="2"
               ></textarea>
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
+                <span style="font-size: 8.5px; color: #64748b; font-weight: 600;">${window.location.hostname}</span>
+                <button id="af-remember-domain-btn" style="font-size: 9px; font-weight: bold; color: #4f46e5; background: none; border: none; cursor: pointer; padding: 2px 4px;">
+                  📌 Remember for site
+                </button>
+              </div>
             </div>
           </div>
 
@@ -585,11 +528,29 @@ class MagicCommandDock {
               ${btnIcon}
               <span>${btnText}</span>
             </button>
-            <div class="af-dock-subactions">
-              <button class="af-btn-qa-quick" id="af-qa-btn" title="Fill Boundary & Edge Case Payloads Instantly">⚡ Edge Cases</button>
+            <div class="af-dock-subactions ${hasUndo ? 'has-undo' : ''}">
               <button class="af-btn-secondary" id="af-rescan-btn">Re-Scan</button>
+              ${hasUndo ? `
+              <button class="af-btn-warning" id="af-undo-btn" title="Undo last autofill and restore previous inputs">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M3 7v6h6"></path>
+                  <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"></path>
+                </svg>
+                <span>Undo</span>
+              </button>
+              <button class="af-btn-secondary" id="af-export-report-btn" title="Copy Markdown bug report of this test run to clipboard">
+                <span>📋 Bug Report</span>
+              </button>
+              ` : ''}
               <button class="af-btn-danger" id="af-clear-btn">Clear</button>
             </div>
+            <button class="af-btn-clipboard" id="af-clipboard-btn" title="Map copied text or JSON from your clipboard into this form">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <rect width="8" height="4" x="8" y="2" rx="1" ry="1"></rect>
+                <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
+              </svg>
+              <span>📋 Paste & Map Clipboard</span>
+            </button>
             <!-- Error Alert -->
             <div class="af-dock-error" id="af-error-alert" style="display: none;">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -604,7 +565,7 @@ class MagicCommandDock {
           <!-- Footer -->
           <div class="af-dock-footer">
             <span>[Alt + F] to Fill</span>
-            <span>${this.getQuotaText()}</span>
+            <span class="af-dock-footer-quota" id="af-footer-quota-link" title="Open Settings">${quota.footerText}</span>
           </div>
         </div>
       `;
@@ -624,18 +585,6 @@ class MagicCommandDock {
           const target = e.currentTarget as HTMLButtonElement;
           const persona = target.getAttribute('data-persona') || 'default';
 
-          if ((persona === 'qa' || persona === 'b2b') && this.userPlan !== 'Pro Plan') {
-            const errorAlert = this.dockContainer?.querySelector('#af-error-alert') as HTMLDivElement;
-            if (errorAlert) {
-              errorAlert.style.display = 'flex';
-              const errorText = errorAlert.querySelector('.af-error-text');
-              if (errorText) {
-                errorText.textContent = "QA and B2B personas require a Pro Plan.";
-              }
-            }
-            return;
-          }
-
           this.currentPersona = persona;
 
           // Force repaint to dynamically update active selection, button class, text, and icons
@@ -648,13 +597,14 @@ class MagicCommandDock {
       // Custom prompt dropdown toggle
       const customTrigger = this.dockContainer.querySelector('#af-toggle-custom-trigger');
       customTrigger?.addEventListener('click', () => {
-        if (this.userPlan !== 'Pro Plan') {
+        const isBypass = this.userPlan === 'Pro Plan' || this.aiProvider !== 'cloud';
+        if (!isBypass && this.userPlan !== 'Pro Plan' && this.aiProvider === 'cloud') {
           const errorAlert = this.dockContainer?.querySelector('#af-error-alert') as HTMLDivElement;
           if (errorAlert) {
             errorAlert.style.display = 'flex';
             const errorText = errorAlert.querySelector('.af-error-text');
             if (errorText) {
-              errorText.textContent = "Custom instructions require a Pro Plan.";
+              errorText.textContent = "Custom instructions require a Pro Plan or personal API key (BYOK).";
             }
           }
           return;
@@ -669,7 +619,7 @@ class MagicCommandDock {
         }
       });
 
-      // Bind Prompt input changes
+      // Bind Prompt input changes & domain memory button
       const textarea = this.dockContainer.querySelector('.af-custom-prompt-input') as HTMLTextAreaElement;
       if (textarea) {
         textarea.value = this.customPrompts[this.currentPersona] || '';
@@ -679,13 +629,32 @@ class MagicCommandDock {
         });
       }
 
+      const rememberDomainBtn = this.dockContainer.querySelector('#af-remember-domain-btn');
+      rememberDomainBtn?.addEventListener('click', async () => {
+        const promptVal = this.customPrompts[this.currentPersona] || '';
+        if (!promptVal.trim()) return;
+        const isBypass = this.userPlan === 'Pro Plan' || this.aiProvider !== 'cloud';
+        const res = await saveDomainPrompt(window.location.hostname, promptVal, this.userPlan, isBypass);
+        if (rememberDomainBtn) {
+          if (res.success) {
+            rememberDomainBtn.textContent = '✓ Saved for site!';
+            setTimeout(() => {
+              rememberDomainBtn.textContent = '📌 Remember for site';
+            }, 2000);
+          } else {
+            const errorAlert = this.dockContainer?.querySelector('#af-error-alert') as HTMLDivElement;
+            if (errorAlert) {
+              errorAlert.style.display = 'flex';
+              const errorText = errorAlert.querySelector('.af-error-text');
+              if (errorText) errorText.textContent = res.error || 'Free tier allows 1 saved site rule. Upgrade to Pro!';
+            }
+          }
+        }
+      });
+
       // Fill Button
       const fillBtn = this.dockContainer.querySelector('#af-fill-btn') as HTMLButtonElement;
       fillBtn?.addEventListener('click', () => this.handleFill());
-
-      // Direct QA Edge Cases Button
-      const qaBtn = this.dockContainer.querySelector('#af-qa-btn') as HTMLButtonElement;
-      qaBtn?.addEventListener('click', () => this.handleFill('qa'));
 
       // Re-scan Button
       const rescanBtn = this.dockContainer.querySelector('#af-rescan-btn') as HTMLButtonElement;
@@ -696,6 +665,76 @@ class MagicCommandDock {
       // Clear Button
       const clearBtn = this.dockContainer.querySelector('#af-clear-btn') as HTMLButtonElement;
       clearBtn?.addEventListener('click', () => this.clearAllForms());
+
+      // Undo Button
+      const undoBtn = this.dockContainer.querySelector('#af-undo-btn') as HTMLButtonElement;
+      undoBtn?.addEventListener('click', () => this.handleUndo());
+
+      // Export Bug Report Button
+      const exportReportBtn = this.dockContainer.querySelector('#af-export-report-btn');
+      exportReportBtn?.addEventListener('click', async () => {
+        chrome.storage.local.get(['lastTestRun'], async (res) => {
+          if (res.lastTestRun) {
+            const md = generateReportMarkdown(res.lastTestRun as TestRunReportData);
+            const success = await copyReportToClipboard(md);
+            if (success && exportReportBtn) {
+              exportReportBtn.innerHTML = `<span>✓ Copied to clipboard!</span>`;
+              setTimeout(() => {
+                exportReportBtn.innerHTML = `<span>📋 Bug Report</span>`;
+              }, 2500);
+            }
+          }
+        });
+      });
+
+      // Clipboard Fill Button
+      const clipboardBtn = this.dockContainer.querySelector('#af-clipboard-btn') as HTMLButtonElement;
+      clipboardBtn?.addEventListener('click', () => this.handleFillFromClipboard());
+
+      // QA Flavor Pills
+      const flavorPills = this.dockContainer.querySelectorAll('.af-qa-flavor-pill');
+      flavorPills.forEach(pill => {
+        pill.addEventListener('click', (e) => {
+          const target = e.currentTarget as HTMLButtonElement;
+          const flavor = target.getAttribute('data-flavor') || 'all';
+          const isBypass = this.userPlan === 'Pro Plan' || this.aiProvider !== 'cloud';
+          if (flavor === 'appsec_pro' && !isBypass && this.userPlan !== 'Pro Plan') {
+            const errorAlert = this.dockContainer?.querySelector('#af-error-alert') as HTMLDivElement;
+            if (errorAlert) {
+              errorAlert.style.display = 'flex';
+              const errorText = errorAlert.querySelector('.af-error-text');
+              if (errorText) errorText.textContent = "OWASP AppSec Suite requires a Pro Plan or personal API key (BYOK).";
+            }
+            return;
+          }
+          this.qaFlavor = flavor;
+          chrome.storage.local.set({ lastQaFlavor: flavor });
+          this.lastQaFlavor = null;
+          this.updateDockState();
+        });
+      });
+
+      // Quota Navigation Actions
+      const openSettings = (targetTab: string = 'account') => {
+        chrome.storage.local.set({ activeTabOnOpen: targetTab }, () => {
+          chrome.runtime.sendMessage({ action: 'open_options' });
+        });
+      };
+
+      const quotaPill = this.dockContainer.querySelector('#af-quota-pill-btn');
+      quotaPill?.addEventListener('click', () => {
+        openSettings(quota.ctaAction === 'upgrade' ? 'subscription' : 'account');
+      });
+
+      const quotaCtaBtn = this.dockContainer.querySelector('#af-quota-cta-btn');
+      quotaCtaBtn?.addEventListener('click', () => {
+        openSettings(quota.ctaAction === 'upgrade' ? 'subscription' : 'account');
+      });
+
+      const footerQuotaLink = this.dockContainer.querySelector('#af-footer-quota-link');
+      footerQuotaLink?.addEventListener('click', () => {
+        openSettings(quota.ctaAction === 'upgrade' ? 'subscription' : 'account');
+      });
     }
   }
 
@@ -733,7 +772,7 @@ class MagicCommandDock {
         if (fields.length === 0) {
           return false;
         }
-        this.handleFill(request.persona, request.customPrompt)
+        this.handleFill(request.persona, request.customPrompt, request.qaFlavor)
           .then(sendResponse)
           .catch(err => sendResponse({ error: err.message }));
         return true;
@@ -756,6 +795,19 @@ class MagicCommandDock {
           sendResponse({ count: fields.length });
         }
         return false;
+      }
+
+      if (request.action === 'undo_fill') {
+        if (this.lastSnapshot && this.lastSnapshot.length > 0) {
+          const count = FormScraper.restoreFormSnapshot(this.lastSnapshot);
+          this.lastSnapshot = null;
+          this.lastSnapshotState = false;
+          this.updateDockState();
+          sendResponse({ success: true, count });
+        } else {
+          sendResponse({ success: false, error: 'No undo snapshot available' });
+        }
+        return true;
       }
       return false;
     });
@@ -834,8 +886,12 @@ class MagicCommandDock {
         this.aiProvider = changes.aiProvider.newValue as string || 'cloud';
         needsUpdate = true;
       }
+      if (changes.qaDailyCount) {
+        this.qaDailyCount = changes.qaDailyCount.newValue as number || 0;
+        needsUpdate = true;
+      }
 
-      if (needsUpdate && this.dockContainer && !this.isMinimized) {
+      if (needsUpdate && this.dockContainer) {
         this.lastMinimizedState = null;
         this.lastFieldsCount = null;
         this.updateDockState();
@@ -844,6 +900,8 @@ class MagicCommandDock {
   }
 
   private clearAllForms() {
+    this.lastSnapshot = null;
+    this.lastSnapshotState = false;
     const inputs = document.querySelectorAll('input, textarea, select');
     inputs.forEach((node) => {
       const el = node as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
@@ -858,28 +916,87 @@ class MagicCommandDock {
       el.dispatchEvent(new Event('change', { bubbles: true }));
     });
 
+    // Clear multi-step session memory for this domain
+    chrome.runtime.sendMessage({ action: 'clear_session_identity', domain: window.location.hostname });
+
     // Scan dynamic fields
     this.updateDockState();
   }
 
-  private async handleFill(overridePersona?: string, overridePrompt?: string) {
-    const persona = overridePersona || this.currentPersona;
-    const prompt = overridePrompt !== undefined ? overridePrompt : (this.customPrompts[persona] || '');
+  private handleUndo() {
+    if (!this.lastSnapshot || this.lastSnapshot.length === 0) return;
+    FormScraper.restoreFormSnapshot(this.lastSnapshot);
+    this.lastSnapshot = null;
+    this.lastSnapshotState = false;
 
-    if ((persona === 'qa' || persona === 'b2b' || prompt) && this.userPlan !== 'Pro Plan') {
-      this.isLoading = false;
+    const undoBtn = this.dockContainer?.querySelector('#af-undo-btn') as HTMLButtonElement;
+    if (undoBtn) {
+      undoBtn.innerHTML = `<span>Restored!</span>`;
+      setTimeout(() => {
+        this.updateDockState();
+      }, 900);
+    } else {
+      this.updateDockState();
+    }
+  }
+
+  private async handleFillFromClipboard() {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (!text || text.trim().length === 0) {
+        const errorAlert = this.dockContainer?.querySelector('#af-error-alert') as HTMLDivElement;
+        if (errorAlert) {
+          errorAlert.style.display = 'flex';
+          const errorText = errorAlert.querySelector('.af-error-text');
+          if (errorText) errorText.textContent = "Clipboard is empty! Copy text or JSON first.";
+          setTimeout(() => {
+            if (errorAlert) errorAlert.style.display = 'none';
+          }, 3000);
+        }
+        return;
+      }
+
+      const snippet = text.trim().slice(0, 3500);
+      const clipboardPrompt = `MAP DATA FROM CLIPBOARD: Extract and populate matching form fields using the following data from the user's clipboard: """${snippet}"""`;
+      await this.handleFill(this.currentPersona, clipboardPrompt);
+    } catch {
       const errorAlert = this.dockContainer?.querySelector('#af-error-alert') as HTMLDivElement;
       if (errorAlert) {
         errorAlert.style.display = 'flex';
         const errorText = errorAlert.querySelector('.af-error-text');
-        if (errorText) {
-          errorText.textContent = "Pro Plan required for advanced options.";
-        }
+        if (errorText) errorText.textContent = "Clipboard permission required or unavailable.";
+        setTimeout(() => {
+          if (errorAlert) errorAlert.style.display = 'none';
+        }, 3000);
       }
-      setTimeout(() => {
-        this.updateDockState();
-      }, 3000);
-      return { success: false, error: 'Pro Plan required for advanced options' };
+    }
+  }
+
+  private async handleFill(overridePersona?: string, overridePrompt?: string, overrideQaFlavor?: string) {
+    const persona = overridePersona || this.currentPersona;
+    const prompt = overridePrompt !== undefined ? overridePrompt : (this.customPrompts[persona] || '');
+    const qaFlavor = overrideQaFlavor || this.qaFlavor || 'all';
+
+    const isBypass = this.userPlan === 'Pro Plan' || this.aiProvider !== 'cloud';
+
+    // QA Daily Cap enforcement for non-bypass users
+    if (persona === 'qa' && !isBypass) {
+      const qaStatus = await this.getQaDailyStatus();
+      if (!qaStatus.allowed) {
+        this.isLoading = false;
+        const errorAlert = this.dockContainer?.querySelector('#af-error-alert') as HTMLDivElement;
+        if (errorAlert) {
+          errorAlert.style.display = 'flex';
+          const errorText = errorAlert.querySelector('.af-error-text');
+          if (errorText) {
+            errorText.textContent = "Daily free QA limit reached (5/5). Upgrade to Pro or add your own API key in Options!";
+          }
+        }
+        setTimeout(() => {
+          this.updateDockState();
+        }, 4000);
+        return { success: false, error: 'Daily free QA limit reached (5/5). Upgrade to Pro or add your own API key in Options.' };
+      }
     }
 
     this.isLoading = true;
@@ -894,7 +1011,7 @@ class MagicCommandDock {
       if (errorText) errorText.textContent = '';
     }
 
-    const isLimitReached = this.aiProvider === 'cloud' && (
+    const isLimitReached = !isBypass && persona !== 'qa' && this.aiProvider === 'cloud' && (
       (!this.authToken && this.usageCount >= 10) ||
       (this.authToken && this.userPlan === 'Free Tier' && this.usageCount >= 50)
     );
@@ -904,7 +1021,8 @@ class MagicCommandDock {
         fillBtn.innerHTML = `<span>Opening Settings...</span>`;
       }
       this.isLoading = false;
-      chrome.storage.local.set({ activeTabOnOpen: 'account' }, () => {
+      const targetTab = this.authToken ? 'subscription' : 'account';
+      chrome.storage.local.set({ activeTabOnOpen: targetTab }, () => {
         chrome.runtime.sendMessage({ action: 'open_options' });
       });
       setTimeout(() => {
@@ -959,7 +1077,8 @@ class MagicCommandDock {
           fields: fields,
           pageContext: pageContext,
           persona: persona,
-          customPrompt: prompt
+          customPrompt: prompt,
+          qaFlavor: qaFlavor
         }, (res) => {
           if (chrome.runtime.lastError) {
             resolve({ error: chrome.runtime.lastError.message || 'Unknown runtime error' });
@@ -970,6 +1089,9 @@ class MagicCommandDock {
       });
 
       if (response && !response.error) {
+        // Snapshot current form values before AI fill so user can 1-click Undo anytime
+        this.lastSnapshot = FormScraper.snapshotForms();
+
         const initialFieldIds = new Set(fields.map(f => f.id));
         const totalCount = await this.injectValuesAndCheckDynamicFields(
           response as Record<string, string>,
@@ -977,6 +1099,28 @@ class MagicCommandDock {
           persona,
           prompt
         );
+
+        // Save last test run report for 1-click export
+        const reportData: TestRunReportData = {
+          url: window.location.href,
+          title: document.title || window.location.hostname,
+          timestamp: new Date().toLocaleString(),
+          persona: persona,
+          provider: this.aiProvider,
+          qaFlavor: persona === 'qa' ? qaFlavor : undefined,
+          fields: fields.map(f => ({
+            id: f.id,
+            label: f.label || f.name || f.placeholder || f.id,
+            name: f.name,
+            type: f.type || 'text',
+            value: (response as Record<string, string>)[f.id] ?? ''
+          }))
+        };
+        chrome.storage.local.set({ lastTestRun: reportData });
+
+        if (persona === 'qa' && !isBypass) {
+          await this.incrementQaDailyCount();
+        }
 
         const totalFillDuration = totalCount * 80;
         const resetDelay = Math.max(1500, totalFillDuration);
@@ -1152,6 +1296,48 @@ class MagicCommandDock {
       return "Network error. Please make sure you are connected to the internet.";
     }
     return rawError;
+  }
+
+  private async getQaDailyStatus(): Promise<{ count: number; remaining: number; allowed: boolean }> {
+    return new Promise((resolve) => {
+      chrome.storage.local.get(['qaDailyCount', 'qaLastDate'], (res) => {
+        const today = new Date().toISOString().slice(0, 10);
+        let count = typeof res.qaDailyCount === 'number' ? res.qaDailyCount : 0;
+        const lastDate = typeof res.qaLastDate === 'string' ? res.qaLastDate : '';
+
+        if (lastDate !== today) {
+          count = 0;
+          chrome.storage.local.set({ qaDailyCount: 0, qaLastDate: today });
+        }
+
+        const limit = 5;
+        this.qaDailyCount = count;
+        resolve({
+          count,
+          remaining: Math.max(0, limit - count),
+          allowed: count < limit
+        });
+      });
+    });
+  }
+
+  private async incrementQaDailyCount(): Promise<number> {
+    return new Promise((resolve) => {
+      chrome.storage.local.get(['qaDailyCount', 'qaLastDate'], (res) => {
+        const today = new Date().toISOString().slice(0, 10);
+        let count = typeof res.qaDailyCount === 'number' ? res.qaDailyCount : 0;
+        const lastDate = typeof res.qaLastDate === 'string' ? res.qaLastDate : '';
+
+        if (lastDate !== today) {
+          count = 0;
+        }
+        count += 1;
+        this.qaDailyCount = count;
+        chrome.storage.local.set({ qaDailyCount: count, qaLastDate: today }, () => {
+          resolve(count);
+        });
+      });
+    });
   }
 
   private destroy() {

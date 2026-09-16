@@ -11,7 +11,8 @@
 import { checkRateLimit } from './src/proxy/rateLimiter.js';
 import { verifyJWT } from './src/proxy/auth.js';
 import { getSupabaseProfile, incrementSupabaseUsage, updateSupabaseProfilePlan } from './src/proxy/supabase.js';
-import { verifyLemonSqueezySignature } from './src/proxy/webhooks.js';
+import { verifyLemonSqueezySignature, verifyPaddleSignature, isPaddleIpAllowed } from './src/proxy/webhooks.js';
+import { INDEX_HTML, TERMS_HTML, PRIVACY_HTML, REFUND_HTML, SUCCESS_HTML } from './src/proxy/landingPages.js';
 
 export default {
   async fetch(request, env, ctx) {
@@ -88,7 +89,7 @@ export default {
         const responseHeaders = new Headers(response.headers);
         responseHeaders.set("Access-Control-Allow-Origin", allowedOrigin);
         responseHeaders.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-        responseHeaders.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
+        responseHeaders.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, X-Anonymous-Client-Id");
 
         return new Response(response.body, {
           status: response.status,
@@ -109,7 +110,7 @@ export default {
     const corsHeaders = {
       "Access-Control-Allow-Origin": allowedOrigin,
       "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Anonymous-Client-Id",
       "X-Content-Type-Options": "nosniff",
       "X-Frame-Options": "DENY",
       "X-XSS-Protection": "1; mode=block",
@@ -121,6 +122,43 @@ export default {
       return new Response(null, {
         headers: corsHeaders,
       });
+    }
+
+    // Public Compliance & Pricing Landing Pages for Paddle Verification
+    if (request.method === "GET" || request.method === "HEAD") {
+      const htmlHeaders = {
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "public, max-age=3600",
+        ...corsHeaders
+      };
+
+      const sendPage = (content) => {
+        return new Response(request.method === "HEAD" ? null : content, { headers: htmlHeaders });
+      };
+
+      const cleanPath = url.pathname.toLowerCase().replace(/\/+$/, "").replace(/\.html$/, "") || "/";
+
+      if (cleanPath === "/" || cleanPath === "/index" || cleanPath === "/pricing") {
+        return sendPage(INDEX_HTML);
+      }
+      if (cleanPath === "/terms" || cleanPath === "/terms-of-service") {
+        return sendPage(TERMS_HTML);
+      }
+      if (cleanPath === "/privacy" || cleanPath === "/privacy-policy") {
+        return sendPage(PRIVACY_HTML);
+      }
+      if (cleanPath === "/refund" || cleanPath === "/refund-policy" || cleanPath === "/refunds") {
+        return sendPage(REFUND_HTML);
+      }
+      if (cleanPath === "/success" || cleanPath === "/order-complete") {
+        return sendPage(SUCCESS_HTML);
+      }
+      if (cleanPath === "/favicon.ico" || cleanPath === "/favicon.svg") {
+        return new Response(
+          '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">⚡</text></svg>',
+          { headers: { "Content-Type": "image/svg+xml", "Cache-Control": "public, max-age=86400", ...corsHeaders } }
+        );
+      }
     }
 
     const isConfigRequest = url.pathname === "/config";
@@ -156,13 +194,17 @@ export default {
     }
 
     const isUsageRequest = url.pathname === "/usage";
-    const isWebhookRequest = url.pathname === "/webhook/lemonsqueezy";
+    const isLemonWebhookRequest = url.pathname === "/webhook/lemonsqueezy";
+    const isPaddleWebhookRequest = url.pathname === "/webhook/paddle";
+    const isPaddleCheckoutRequest = url.pathname === "/checkout/paddle";
+    const isPaddlePortalRequest = url.pathname === "/portal/paddle";
+    const isPaddleCancelRequest = url.pathname === "/subscription/cancel" || url.pathname === "/subscription/paddle/cancel";
 
     try {
-      // Handle Lemon Squeezy Webhooks first (rate limited to 30 req/min per IP)
-      if (isWebhookRequest) {
+      // 1. Handle Lemon Squeezy Webhooks (rate limited to 30 req/min per IP)
+      if (isLemonWebhookRequest) {
         const clientIP = request.headers.get("CF-Connecting-IP") || "anon_ip";
-        const whRateLimit = await checkRateLimit(env, `webhook:${clientIP}`, 30, 60);
+        const whRateLimit = await checkRateLimit(env, `webhook:lemon:${clientIP}`, 30, 60);
         if (!whRateLimit.allowed) {
           return new Response("Too Many Webhook Requests", {
             status: 429,
@@ -195,10 +237,10 @@ export default {
 
         // Webhook Idempotency Guard: prevent duplicate webhook replay processing
         if (eventId && env.USERS_KV) {
-          const processedKey = `webhook:processed:${eventId}`;
+          const processedKey = `webhook:processed:lemon:${eventId}`;
           const alreadyProcessed = await env.USERS_KV.get(processedKey);
           if (alreadyProcessed) {
-            console.log(`Webhook event ${eventId} already processed. Skipping duplicate payload.`);
+            console.log(`Lemon Squeezy event ${eventId} already processed. Skipping duplicate payload.`);
             return new Response(JSON.stringify({ received: true, status: "already_processed" }), {
               headers: { "Content-Type": "application/json", ...corsHeaders }
             });
@@ -242,10 +284,148 @@ export default {
         });
       }
 
+      // 1.1. Handle Paddle Billing Webhooks (rate limited to 30 req/min per IP)
+      if (isPaddleWebhookRequest) {
+        const clientIP = request.headers.get("CF-Connecting-IP") || "anon_ip";
+        const whRateLimit = await checkRateLimit(env, `webhook:paddle:${clientIP}`, 30, 60);
+        if (!whRateLimit.allowed) {
+          return new Response("Too Many Webhook Requests", {
+            status: 429,
+            headers: {
+              "Retry-After": whRateLimit.reset.toString(),
+              ...corsHeaders
+            }
+          });
+        }
+
+        // Verify Paddle Live IP Allowlist (log warning if outside CIDR, signature verification below enforces security)
+        const isIpPermitted = await isPaddleIpAllowed(clientIP);
+        if (!isIpPermitted) {
+          console.warn(`[Paddle Webhook] Notice: Webhook request from unlisted IP: ${clientIP}. Proceeding with cryptographic signature check.`);
+        }
+
+        const signatureHeader = request.headers.get("Paddle-Signature");
+        const bodyText = await request.text();
+        const secret = env.PADDLE_WEBHOOK_SECRET;
+
+        // Verify signature (fail-closed)
+        if (!secret) {
+          console.error("PADDLE_WEBHOOK_SECRET is not configured in the environment.");
+          return new Response("Webhook verification failed: Secret configuration missing", { status: 500 });
+        }
+
+        const isVerified = await verifyPaddleSignature(bodyText, signatureHeader, secret);
+        if (!isVerified) {
+          console.warn("[Paddle Webhook] Signature verification failed.");
+          return new Response("Invalid Paddle Webhook Signature", { status: 400 });
+        }
+
+        let payload;
+        try {
+          payload = JSON.parse(bodyText);
+        } catch {
+          return new Response("Invalid JSON payload", { status: 400 });
+        }
+
+        const eventType = payload.event_type || "";
+        const eventId = payload.event_id || (payload.data ? payload.data.id : null);
+        const customData = payload.data ? payload.data.custom_data : null;
+        const userId = customData ? (customData.user_id || customData.userId) : null;
+
+        // Webhook Idempotency Guard
+        if (eventId && env.USERS_KV) {
+          const processedKey = `webhook:processed:paddle:${eventId}`;
+          const alreadyProcessed = await env.USERS_KV.get(processedKey);
+          if (alreadyProcessed) {
+            console.log(`Paddle webhook event ${eventId} already processed. Skipping duplicate.`);
+            return new Response(JSON.stringify({ received: true, status: "already_processed" }), {
+              headers: { "Content-Type": "application/json", ...corsHeaders }
+            });
+          }
+          await env.USERS_KV.put(processedKey, "1", { expirationTtl: 7 * 86400 });
+        }
+
+        if (userId) {
+          let updatedPlan = "Free Tier";
+          let customerPortal = "";
+          const data = payload.data || {};
+          const status = data.status || "";
+
+          // Extract customer management portal URL if available
+          if (data.management_urls) {
+            const rawUrl = data.management_urls.update_payment_method || data.management_urls.cancel || "";
+            customerPortal = rawUrl ? rawUrl.split("?")[0] : "";
+          }
+
+          // If transaction.completed has a subscription_id, fetch management URLs from Paddle
+          if (!customerPortal && data.subscription_id && env.PADDLE_API_KEY) {
+            try {
+              const subRes = await fetch(`https://api.paddle.com/subscriptions/${data.subscription_id}`, {
+                headers: { "Authorization": `Bearer ${env.PADDLE_API_KEY.trim()}` }
+              });
+              if (subRes.ok) {
+                const subJson = await subRes.json();
+                if (subJson.data && subJson.data.management_urls) {
+                  const rawUrl = subJson.data.management_urls.update_payment_method || subJson.data.management_urls.cancel || "";
+                  customerPortal = rawUrl ? rawUrl.split("?")[0] : "";
+                }
+              }
+            } catch (mgmtErr) {
+              console.warn("[Paddle Webhook] Exception fetching subscription management URL:", mgmtErr.message || mgmtErr);
+            }
+          }
+
+          if (
+            eventType === "subscription.canceled" ||
+            eventType === "subscription.past_due" ||
+            status === "canceled" ||
+            status === "past_due"
+          ) {
+            updatedPlan = "Free Tier";
+          } else if (
+            eventType === "subscription.activated" ||
+            eventType === "subscription.created" ||
+            eventType === "subscription.updated" ||
+            eventType === "transaction.completed" ||
+            eventType === "transaction.paid"
+          ) {
+            if (status === "active" || status === "trialing" || eventType.startsWith("transaction.")) {
+              updatedPlan = "Pro Plan";
+            }
+          }
+
+          // 1. Sync to Supabase DB if configured
+          await updateSupabaseProfilePlan(userId, updatedPlan, customerPortal, env);
+
+          // 2. Sync to KV (for backward compatibility/speed)
+          if (env.USERS_KV) {
+            await env.USERS_KV.put(`user:plan:${userId}`, updatedPlan);
+            if (customerPortal) {
+              await env.USERS_KV.put(`user:customer_portal:${userId}`, customerPortal);
+            }
+          }
+          console.log(`Successfully updated plan for user ${userId} to ${updatedPlan} via Paddle webhook (${eventType})`);
+        }
+
+        return new Response(JSON.stringify({ received: true }), {
+          headers: { 
+            "Content-Type": "application/json",
+            ...corsHeaders 
+          }
+        });
+      }
+
       // 2. SaaS Authentication (Supabase JWT Verification)
       const authHeader = request.headers.get("Authorization");
+      const clientIP = request.headers.get("CF-Connecting-IP") || "anonymous_ip";
+      const rawAnonClientId = request.headers.get("X-Anonymous-Client-Id") || "";
+      const validAnonClientId = (typeof rawAnonClientId === "string" && /^anon_[a-zA-Z0-9_-]{16,64}$/.test(rawAnonClientId.trim()))
+        ? rawAnonClientId.trim()
+        : null;
+
       let userTier = "anonymous";
-      let userId = request.headers.get("CF-Connecting-IP") || "anonymous_ip";
+      let userId = validAnonClientId || clientIP;
+      const anonStorageKey = validAnonClientId ? `anon:id:${validAnonClientId}` : `anon:ip:${clientIP}`;
       let jwtPayload = null;
 
       if (authHeader && authHeader.startsWith("Bearer ")) {
@@ -263,7 +443,7 @@ export default {
             }
           });
         }
-      } else if (isUsageRequest) {
+      } else if (isUsageRequest || isPaddleCheckoutRequest || isPaddlePortalRequest || isPaddleCancelRequest) {
         return new Response(JSON.stringify({ error: "Authentication Required" }), {
           status: 401,
           headers: {
@@ -273,28 +453,324 @@ export default {
         });
       }
 
+      // 2.1. Handle Paddle Checkout Session Creation (Rate limited to 10 req/min per user)
+      if (isPaddleCheckoutRequest) {
+        const checkoutRateLimit = await checkRateLimit(env, `checkout:paddle:${userId}`, 10, 60);
+        if (!checkoutRateLimit.allowed) {
+          return new Response(JSON.stringify({ error: "Too many checkout attempts. Please wait a moment." }), {
+            status: 429,
+            headers: {
+              "Content-Type": "application/json",
+              "Retry-After": checkoutRateLimit.reset.toString(),
+              ...corsHeaders
+            }
+          });
+        }
+
+        const paddleApiKey = env.PADDLE_API_KEY ? env.PADDLE_API_KEY.trim() : "";
+        const paddlePriceId = env.PADDLE_PRO_PRICE_ID ? env.PADDLE_PRO_PRICE_ID.trim() : "";
+        const paddleEnv = (env.PADDLE_ENVIRONMENT || "production").trim();
+        const paddleBaseUrl = paddleEnv === "sandbox" ? "https://sandbox-api.paddle.com" : "https://api.paddle.com";
+
+        if (!paddleApiKey || !paddlePriceId) {
+          console.error("[Paddle Checkout] Missing PADDLE_API_KEY or PADDLE_PRO_PRICE_ID in worker environment.");
+          return new Response(JSON.stringify({ 
+            error: "Paddle payment gateway is not configured on the server. Please ensure PADDLE_API_KEY and PADDLE_PRO_PRICE_ID are set in Cloudflare Worker secrets." 
+          }), {
+            status: 503,
+            headers: { "Content-Type": "application/json", ...corsHeaders }
+          });
+        }
+
+        try {
+          let requestBody = null;
+          if (request.method === "POST") {
+            try {
+              requestBody = await request.clone().json();
+            } catch {
+              requestBody = null;
+            }
+          }
+          const discountId = (requestBody && requestBody.discount_id) ? String(requestBody.discount_id).trim() : null;
+
+          const transactionPayload = {
+            items: [
+              {
+                price_id: paddlePriceId,
+                quantity: 1
+              }
+            ],
+            checkout: {
+              success_url: "https://filli-ai.pages.dev/success.html"
+            },
+            ...(discountId ? { discount_id: discountId } : {}),
+            custom_data: {
+              user_id: String(userId)
+            }
+          };
+
+          const paddleRes = await fetch(`${paddleBaseUrl}/transactions`, {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${paddleApiKey}`,
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify(transactionPayload)
+          });
+
+          const responseText = await paddleRes.text();
+          let paddleData = null;
+          try {
+            paddleData = JSON.parse(responseText);
+          } catch {
+            paddleData = null;
+          }
+
+          if (!paddleRes.ok || !paddleData) {
+            console.error(`[Paddle Checkout] Paddle API returned ${paddleRes.status}:`, responseText);
+            let errMsg = "Failed to initiate Paddle checkout transaction.";
+            if (paddleData && paddleData.error) {
+              const detail = paddleData.error.detail || "";
+              const subErrors = Array.isArray(paddleData.error.errors)
+                ? paddleData.error.errors.map(e => `${e.field ? e.field + ': ' : ''}${e.message}`).join(', ')
+                : "";
+              errMsg = subErrors ? `${detail} - ${subErrors}` : (detail || errMsg);
+            } else if (responseText) {
+              errMsg = `Paddle API Error (${paddleRes.status}): ${responseText.slice(0, 180)}`;
+            }
+            return new Response(JSON.stringify({ error: errMsg, raw: paddleData }), {
+              status: 502,
+              headers: { "Content-Type": "application/json", ...corsHeaders }
+            });
+          }
+
+          const checkoutUrl = paddleData.data && paddleData.data.checkout ? paddleData.data.checkout.url : null;
+          if (!checkoutUrl) {
+            console.error("[Paddle Checkout] Paddle transaction returned no checkout.url:", paddleData);
+            return new Response(JSON.stringify({ error: "Paddle did not return a checkout URL for this transaction." }), {
+              status: 502,
+              headers: { "Content-Type": "application/json", ...corsHeaders }
+            });
+          }
+
+          return new Response(JSON.stringify({ checkoutUrl }), {
+            headers: { "Content-Type": "application/json", ...corsHeaders }
+          });
+        } catch (checkoutErr) {
+          console.error("[Paddle Checkout] Exception initiating transaction:", checkoutErr);
+          return new Response(JSON.stringify({ error: "Internal server error creating checkout session." }), {
+            status: 500,
+            headers: { "Content-Type": "application/json", ...corsHeaders }
+          });
+        }
+      }
+
+      // 2.2. Handle Paddle Customer Portal URL Request (Rate limited to 15 req/min per user)
+      if (isPaddlePortalRequest) {
+        const portalRateLimit = await checkRateLimit(env, `portal:paddle:${userId}`, 15, 60);
+        if (!portalRateLimit.allowed) {
+          return new Response(JSON.stringify({ error: "Too many portal requests. Please wait a moment." }), {
+            status: 429,
+            headers: {
+              "Content-Type": "application/json",
+              "Retry-After": portalRateLimit.reset.toString(),
+              ...corsHeaders
+            }
+          });
+        }
+
+        let portalUrl = "";
+
+        // 1. Check USERS_KV first for cached portal URL
+        if (env.USERS_KV) {
+          portalUrl = await env.USERS_KV.get(`user:customer_portal:${userId}`) || "";
+        }
+
+        // 2. Check Supabase DB if not found in KV
+        if (!portalUrl) {
+          const dbProfile = await getSupabaseProfile(userId, env);
+          if (dbProfile && dbProfile.customer_portal_url) {
+            portalUrl = dbProfile.customer_portal_url;
+          }
+        }
+
+        // 3. Fallback: Query Paddle API directly for user's subscriptions / customer
+        const paddleApiKey = env.PADDLE_API_KEY ? env.PADDLE_API_KEY.trim() : "";
+        if (!portalUrl && paddleApiKey) {
+          try {
+            const userEmail = (jwtPayload && jwtPayload.email) ? jwtPayload.email.trim().toLowerCase() : "";
+            if (userEmail) {
+              const custRes = await fetch(`https://api.paddle.com/customers?email=${encodeURIComponent(userEmail)}`, {
+                headers: { "Authorization": `Bearer ${paddleApiKey}` }
+              });
+              if (custRes.ok) {
+                const custData = await custRes.json();
+                const customer = custData.data && custData.data[0];
+                if (customer && customer.id) {
+                  const subRes = await fetch(`https://api.paddle.com/subscriptions?customer_id=${customer.id}`, {
+                    headers: { "Authorization": `Bearer ${paddleApiKey}` }
+                  });
+                  if (subRes.ok) {
+                    const subData = await subRes.json();
+                    const sub = subData.data && subData.data[0];
+                    if (sub && sub.management_urls) {
+                      const mgmtUrl = sub.management_urls.update_payment_method || sub.management_urls.cancel || "";
+                      if (mgmtUrl) {
+                        portalUrl = mgmtUrl.split("?")[0];
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          } catch (fetchErr) {
+            console.error("[Paddle Portal] Exception querying Paddle API:", fetchErr);
+          }
+        }
+
+        if (portalUrl && portalUrl.includes("/cpl_")) {
+          const cleanPortalUrl = portalUrl.split("?")[0];
+          if (env.USERS_KV) {
+            await env.USERS_KV.put(`user:customer_portal:${userId}`, cleanPortalUrl);
+          }
+          return new Response(JSON.stringify({ portalUrl: cleanPortalUrl }), {
+            headers: { "Content-Type": "application/json", ...corsHeaders }
+          });
+        }
+
+        return new Response(JSON.stringify({
+          error: "No active billing portal found for this account. If you cancelled or do not have an active subscription, portal access is not required."
+        }), {
+          status: 404,
+          headers: { "Content-Type": "application/json", ...corsHeaders }
+        });
+      }
+
+      // 2.3. Handle Paddle Subscription Cancellation Request (Rate limited to 5 req/min per user)
+      if (isPaddleCancelRequest) {
+        const cancelRateLimit = await checkRateLimit(env, `cancel:paddle:${userId}`, 5, 60);
+        if (!cancelRateLimit.allowed) {
+          return new Response(JSON.stringify({ error: "Too many cancellation attempts. Please wait a moment." }), {
+            status: 429,
+            headers: {
+              "Content-Type": "application/json",
+              "Retry-After": cancelRateLimit.reset.toString(),
+              ...corsHeaders
+            }
+          });
+        }
+
+        const paddleApiKey = env.PADDLE_API_KEY ? env.PADDLE_API_KEY.trim() : "";
+        if (!paddleApiKey) {
+          return new Response(JSON.stringify({ error: "Paddle API is not configured." }), {
+            status: 500,
+            headers: { "Content-Type": "application/json", ...corsHeaders }
+          });
+        }
+
+        try {
+          const userEmail = (jwtPayload && jwtPayload.email) ? jwtPayload.email.trim().toLowerCase() : "";
+          if (!userEmail) {
+            return new Response(JSON.stringify({ error: "User email not found in authentication session." }), {
+              status: 400,
+              headers: { "Content-Type": "application/json", ...corsHeaders }
+            });
+          }
+
+          // 1. Look up customer in Paddle
+          const custRes = await fetch(`https://api.paddle.com/customers?email=${encodeURIComponent(userEmail)}`, {
+            headers: { "Authorization": `Bearer ${paddleApiKey}` }
+          });
+          const custData = await custRes.json();
+          const customer = custData.data && custData.data[0];
+          if (!customer || !customer.id) {
+            if (env.USERS_KV) {
+              await env.USERS_KV.put(`user:plan:${userId}`, "Free Tier");
+            }
+            await updateSupabaseProfilePlan(userId, "Free Tier", "", env);
+            return new Response(JSON.stringify({ success: true, message: "No active subscription found. Plan set to Free Tier.", plan: "Free Tier" }), {
+              headers: { "Content-Type": "application/json", ...corsHeaders }
+            });
+          }
+
+          // 2. Find active subscription
+          const subRes = await fetch(`https://api.paddle.com/subscriptions?customer_id=${customer.id}&status=active`, {
+            headers: { "Authorization": `Bearer ${paddleApiKey}` }
+          });
+          const subData = await subRes.json();
+          const activeSub = subData.data && subData.data[0];
+
+          if (activeSub && activeSub.id) {
+            // Cancel subscription immediately on Paddle
+            const cancelRes = await fetch(`https://api.paddle.com/subscriptions/${activeSub.id}/cancel`, {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${paddleApiKey}`,
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({ effective_from: "immediately" })
+            });
+            if (!cancelRes.ok) {
+              const cancelErrData = await cancelRes.json().catch(() => ({}));
+              const errDetail = cancelErrData.error ? cancelErrData.error.detail : "Paddle cancel failed";
+              return new Response(JSON.stringify({ error: errDetail }), {
+                status: 502,
+                headers: { "Content-Type": "application/json", ...corsHeaders }
+              });
+            }
+          }
+
+          // 3. Immediately reset local plan to Free Tier in KV and Supabase
+          if (env.USERS_KV) {
+            await env.USERS_KV.put(`user:plan:${userId}`, "Free Tier");
+          }
+          await updateSupabaseProfilePlan(userId, "Free Tier", "", env);
+
+          return new Response(JSON.stringify({ 
+            success: true, 
+            message: "Subscription successfully canceled. You are now on the Free Tier.", 
+            plan: "Free Tier" 
+          }), {
+            headers: { "Content-Type": "application/json", ...corsHeaders }
+          });
+        } catch (err) {
+          console.error("[Paddle Cancel] Exception canceling subscription:", err);
+          return new Response(JSON.stringify({ error: "Internal server error canceling subscription." }), {
+            status: 500,
+            headers: { "Content-Type": "application/json", ...corsHeaders }
+          });
+        }
+      }
+
       // 3. Retrieve plan & usage count
       let userPlan = "Free Tier";
       let usageCount = 0;
       let customerPortalUrl = "";
 
       if (userTier === "authenticated") {
+        const currentMonth = new Date().toISOString().slice(0, 7);
         // Try Supabase DB lookup first
         const dbProfile = await getSupabaseProfile(userId, env);
         if (dbProfile) {
           userPlan = dbProfile.plan || "Free Tier";
           usageCount = parseInt(dbProfile.usage_count || "0", 10);
           customerPortalUrl = dbProfile.customer_portal_url || "";
-        } else if (env.USERS_KV) {
-          // Fallback to KV if DB fails/is unconfigured
-          userPlan = await env.USERS_KV.get(`user:plan:${userId}`) || "Free Tier";
-          usageCount = parseInt(await env.USERS_KV.get(`user:fills:${userId}`) || "0", 10);
-          customerPortalUrl = await env.USERS_KV.get(`user:customer_portal:${userId}`) || "";
+        }
+        
+        // Fallback or check KV for plan & portal
+        if (env.USERS_KV) {
+          if (!dbProfile) {
+            userPlan = await env.USERS_KV.get(`user:plan:${userId}`) || "Free Tier";
+            usageCount = parseInt(await env.USERS_KV.get(`user:fills:${userId}:${currentMonth}`) || "0", 10);
+          }
+          if (!customerPortalUrl) {
+            customerPortalUrl = await env.USERS_KV.get(`user:customer_portal:${userId}`) || "";
+          }
         }
       } else {
         userPlan = "Anonymous Tier";
         if (env.USERS_KV) {
-          usageCount = parseInt(await env.USERS_KV.get(`anon:fills:${userId}`) || "0", 10);
+          usageCount = parseInt(await env.USERS_KV.get(anonStorageKey) || "0", 10);
         }
       }
 
@@ -542,22 +1018,23 @@ export default {
       let newUsageCount = usageCount;
       if (incrementUsage !== false) {
         if (userTier === "authenticated") {
+          const currentMonth = new Date().toISOString().slice(0, 7);
           // Try atomic increment in Supabase first
           const dbNewCount = await incrementSupabaseUsage(userId, env);
           if (dbNewCount !== null) {
             newUsageCount = dbNewCount;
           } else {
-            // Fallback to KV read-modify-write if DB fails
+            // Fallback to KV read-modify-write if DB fails (monthly keyed, 60 day TTL)
             newUsageCount = usageCount + 1;
             if (env.USERS_KV) {
-              await env.USERS_KV.put(`user:fills:${userId}`, newUsageCount.toString());
+              await env.USERS_KV.put(`user:fills:${userId}:${currentMonth}`, newUsageCount.toString(), { expirationTtl: 60 * 86400 });
             }
           }
         } else {
-          // Anonymous user: increment in KV
+          // Anonymous user: increment in KV with 30-day TTL
           newUsageCount = usageCount + 1;
           if (env.USERS_KV) {
-            await env.USERS_KV.put(`anon:fills:${userId}`, newUsageCount.toString());
+            await env.USERS_KV.put(anonStorageKey, newUsageCount.toString(), { expirationTtl: 30 * 86400 });
           }
         }
       }
